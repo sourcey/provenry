@@ -4,6 +4,7 @@ import {
   canonicalJson,
   compareCanonicalStrings,
   digest,
+  MAX_CANONICAL_JSON_DEPTH,
   sha256Bytes,
 } from "../modules/primitives/src/index.js";
 
@@ -17,6 +18,52 @@ test("canonical JSON is NFC text with keys in code-unit order", () => {
   );
   assert.equal(digest(value), sha256Bytes(canonicalJson(value)));
   assert.equal(canonicalJson({ "\u{1f600}": 1, "￿": 2, "퟿": 3 }), '{"퟿":3,"😀":1,"￿":2}');
+});
+
+test("canonical JSON never silently drops data or executes accessors", () => {
+  let invoked = false;
+  const accessor = {
+    get value() {
+      invoked = true;
+      return 1;
+    },
+  };
+  const cyclic: Record<string, unknown> = {};
+  cyclic.self = cyclic;
+  const hidden = Object.defineProperty({}, "value", { value: 1 });
+  const extraArray = Object.assign([1], { extra: 2 });
+  const cases = [
+    new Array(1),
+    Object.assign(new Array(3), { 0: 1, 2: 2 }),
+    extraArray,
+    new Map(),
+    new Set(),
+    new Date(),
+    Buffer.from("a"),
+    accessor,
+    hidden,
+    { [Symbol("value")]: 1 },
+    cyclic,
+    new Proxy(
+      {},
+      {
+        ownKeys() {
+          invoked = true;
+          return [];
+        },
+      },
+    ),
+  ];
+  for (const value of cases) assert.throws(() => canonicalJson(value), TypeError);
+  assert.equal(invoked, false);
+  const shared = { a: 1 };
+  assert.equal(canonicalJson([shared, shared]), '[{"a":1},{"a":1}]');
+  assert.equal(canonicalJson(Object.assign(Object.create(null), shared)), '{"a":1}');
+  assert.equal(canonicalJson({ "2": 2, "10": 10 }), '{"10":10,"2":2}');
+  let nested: unknown = null;
+  for (let depth = 0; depth < MAX_CANONICAL_JSON_DEPTH; depth++) nested = [nested];
+  assert.doesNotThrow(() => canonicalJson(nested));
+  assert.throws(() => canonicalJson([nested]), /nested containers/u);
 });
 
 test("canonical JSON rejects values with no single byte form", () => {

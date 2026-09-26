@@ -245,6 +245,36 @@ test("publication materialization rejects escaping and reserved paths before tou
   }
 });
 
+test("failed materialization preserves prior output and successful replacement removes stale files", async () => {
+  const root = await mkdtemp(join(tmpdir(), "publication-stage-"));
+  const output = join(root, "release");
+  try {
+    await writeReleaseFiles(output, {
+      files: new Map([["retained.txt", "original"]]),
+      bundleBytes: "old",
+    });
+    for (const files of [
+      new Map([
+        ["notes/a", "a"],
+        ["notes/a/b", "b"],
+      ]),
+      new Map([[`notes/${"a".repeat(300)}`, "too long"]]),
+    ]) {
+      await assert.rejects(writeReleaseFiles(output, { files, bundleBytes: "new" }));
+      assert.equal(await readFile(join(output, "retained.txt"), "utf8"), "original");
+      assert.equal(await readFile(join(output, "bundle.json"), "utf8"), "old");
+    }
+    await writeReleaseFiles(output, {
+      files: new Map([["notes/next", "next"]]),
+      bundleBytes: "new",
+    });
+    assert.equal(await readFile(join(output, "notes/next"), "utf8"), "next");
+    await assert.rejects(readFile(join(output, "retained.txt")), /ENOENT/u);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("publication input roots cannot follow a symlink outside the declared tree", async () => {
   const root = await mkdtemp(join(tmpdir(), "publication-input-root-"));
   const outside = await mkdtemp(join(tmpdir(), "publication-outside-"));

@@ -7,11 +7,12 @@ import { z } from "zod";
 import {
   encodePublicationChanges,
   PUBLICATION_ENVELOPE_FILES,
+  encodePublicationJson as prettyJson,
   publicationChangeSchema,
   publicationEnvelopeSchemas,
   publicationOwnershipRegistry,
 } from "../contracts/publication/src/index.js";
-import { digest, prettyJson, sha256Bytes } from "../modules/primitives/src/index.js";
+import { digest, sha256Bytes } from "../modules/primitives/src/index.js";
 import { sealPublicationChange } from "../modules/publication/src/changes.js";
 import {
   createPublicationEnvelope,
@@ -65,6 +66,66 @@ const signerRegistryDigest = digest({ fixture: "signer-registry" });
 const verifierDigest = digest({ fixture: "ledger-verifier" });
 const notePolicyDigest = digest({ fixture: "note-policy" });
 const emptyIndex = digest({ index: [] });
+
+test("nested adapter data and Unicode have one envelope byte form", () => {
+  const flexible = publicationChangeSchema({
+    kind: z.literal("note.retired"),
+    subjectTypes: ["note", "author"],
+    tombstone: z.record(z.string(), z.unknown()),
+  });
+  const engine = createPublicationEnvelope({
+    schemas: publicationEnvelopeSchemas(contracts, flexible),
+    ownership,
+  });
+  const build = (compiler: string, tombstone: Record<string, unknown>) =>
+    engine.begin(new Map()).seal({
+      snapshotCore: {
+        snapshot_contract: contracts.snapshot,
+        release_sequence: 1,
+        compiler_version: compiler,
+        artifact_contract: contracts.artifact,
+        input_set_digest: emptyIndex,
+        artifact_digest: emptyIndex,
+        resource_digests: {},
+        root_set_digest: rootSetDigest,
+        signer_registry_digest: signerRegistryDigest,
+        trust_transition_digest: null,
+        policy_as_of: "2026-09-26T00:00:00Z",
+      },
+      parent: null,
+      changes: [
+        sealPublicationChange({
+          kind: "note.retired" as const,
+          subject_type: "note" as const,
+          subject_id: "n1",
+          revision_digest: emptyIndex,
+          basis_event_ids: [],
+          tombstone,
+        }),
+      ],
+      admittedInputDigests: [emptyIndex],
+      verifierDigest,
+      resourceDigests: {},
+    });
+  const a = build("é", { z: { a: 1, b: "é" }, a: true });
+  const b = build("e\u0301", { a: true, z: { b: "e\u0301", a: 1 } });
+  assert.equal(a.descriptor.release_id, b.descriptor.release_id);
+  assert.deepEqual(a.descriptor, b.descriptor);
+  assert.deepEqual(a.diff, b.diff);
+  assert.deepEqual(a.files, b.files);
+  assert.equal(a.bundleBytes, b.bundleBytes);
+  engine.verify(asBuffers(a.files, a.bundleBytes));
+  engine.verify(asBuffers(b.files, b.bundleBytes));
+});
+
+test("objects must form a materializable tree before a release can be sealed", () => {
+  for (const paths of [["notes/a", "notes/a/b"], ["bundle.json/x"], ["journal.json/x"]]) {
+    assert.throws(
+      () => envelope.begin(new Map(paths.map((path) => [path, "{}"]))),
+      /cannot contain file/u,
+    );
+  }
+});
 
 type LedgerChange = z.output<typeof change>;
 type Json = Record<string, unknown>;
@@ -609,13 +670,19 @@ test("verification refuses every forged envelope binding before adapters read ob
       /unregistered resource photo-index/u,
     ],
     [
-      "snapshot resources out of canonical order",
-      forgeDescriptor(release, (descriptor) => {
-        descriptor.snapshot_core.resource_digests = Object.fromEntries(
-          Object.entries(descriptor.snapshot_core.resource_digests as Json).reverse(),
+      "snapshot resources out of canonical byte order",
+      forge(release, (files) => {
+        const descriptor = readJson(files, PUBLICATION_ENVELOPE_FILES.descriptor);
+        const snapshot = descriptor.snapshot_core as Json;
+        snapshot.resource_digests = Object.fromEntries(
+          Object.entries(snapshot.resource_digests as Json).reverse(),
+        );
+        files.set(
+          PUBLICATION_ENVELOPE_FILES.descriptor,
+          Buffer.from(`${JSON.stringify(descriptor)}\n`),
         );
       }),
-      /snapshot resources must be unique and canonically ordered/u,
+      /canonical/u,
     ],
     [
       "admitted inputs out of canonical order",
@@ -787,6 +854,16 @@ test("byte closure is a separate, weaker check than envelope verification", () =
   const release = asBuffers(sealed.files, sealed.bundleBytes);
   const closed = envelope.verifyFiles(release);
   assert.equal(closed.bundle.bundle_digest, sealed.bundle.bundle_digest);
+  const alternateBundleBytes = new Map(release);
+  alternateBundleBytes.set(
+    PUBLICATION_ENVELOPE_FILES.bundle,
+    Buffer.from(`${JSON.stringify(sealed.bundle, null, 2)}\n`),
+  );
+  assert.throws(
+    () => envelope.verifyFiles(alternateBundleBytes),
+    /bundle.json.*canonical rendering/u,
+    "Transport identity must include the unlisted bundle file's canonical byte form.",
+  );
   assert.deepEqual(
     [...closed.files.keys()],
     [...closed.files.keys()].sort((left, right) => (left < right ? -1 : 1)),

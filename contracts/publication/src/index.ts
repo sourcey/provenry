@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   digest as canonicalDigest,
+  canonicalJson,
   compareCanonicalStrings,
   DIGEST_PATTERN,
   IDENTIFIER_PATTERN,
@@ -25,7 +26,12 @@ const integerLike = /^(?:0|[1-9][0-9]*)$/u;
 export function encodePublicationChanges(changes: readonly object[]): string {
   return changes.length === 0
     ? ""
-    : `${changes.map((change) => JSON.stringify(change)).join("\n")}\n`;
+    : `${changes.map((change) => canonicalJson(change)).join("\n")}\n`;
+}
+
+/** The only JSON file encoding of the envelope, including nested adapter values. */
+export function encodePublicationJson(value: unknown): string {
+  return `${canonicalJson(value)}\n`;
 }
 
 /** The `release_core.diff_digest` of an ordered change list. */
@@ -68,6 +74,26 @@ export function isCanonicalPublicationPath(path: string): boolean {
     !integerLike.test(path) &&
     path.split("/").every((segment) => objectPathSegment.test(segment))
   );
+}
+
+/** A file set must also be a possible tree: a file can never contain another file. */
+export function assertPublicationFilePaths(paths: Iterable<string>): void {
+  const files = new Set<string>();
+  for (const path of paths) {
+    if (!isCanonicalPublicationPath(path)) {
+      throw new Error(`Publication file path is not canonical: ${path}.`);
+    }
+    if (files.has(path)) throw new Error(`Publication file path is repeated: ${path}.`);
+    files.add(path);
+  }
+  for (const path of files) {
+    for (let slash = path.indexOf("/"); slash !== -1; slash = path.indexOf("/", slash + 1)) {
+      const ancestor = path.slice(0, slash);
+      if (files.has(ancestor)) {
+        throw new Error(`Publication file ${ancestor} cannot contain file ${path}.`);
+      }
+    }
+  }
 }
 
 export function isPublicationEnvelopePath(path: string): boolean {

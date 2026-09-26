@@ -73,3 +73,32 @@ test("a mismatched installed verifier or changed delivery cannot become a public
     assert.equal(deliveryCalls, changed === "verifier" ? 0 : 1);
   }
 });
+
+test("installation cannot be replaced through mutable configuration during preparation", async () => {
+  const installed = {
+    artifactDigest: verifierDigest as string,
+    async verify() {
+      return { bundleDigest, verifierDigest };
+    },
+  };
+  const interpretation = { member: "one" };
+  const original = installed.verify;
+  installed.verify = async () => ({ ...(await original()), interpretation });
+  const prepare = createPublicationPreparation({
+    verifier: installed,
+    async build(_input: undefined, bound) {
+      assert.equal(bound, verifierDigest);
+      installed.artifactDigest = rootSetDigest;
+      installed.verify = async () => {
+        throw new Error("Substituted verifier must not execute.");
+      };
+      return { built: "built", directory: "/release", bundleDigest, rootSetDigest };
+    },
+    async prepareDelivery() {
+      return { prepared: {}, bundleDigest };
+    },
+  });
+  const prepared = await prepare(undefined);
+  assert.equal(prepared.verified.verifierDigest, verifierDigest);
+  assert.equal((prepared.verified as { interpretation?: unknown }).interpretation, interpretation);
+});

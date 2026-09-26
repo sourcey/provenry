@@ -45,11 +45,21 @@ and forges every binding to prove verification refuses it.
 
 ## Guarantees
 
-- Every digest covers canonical JSON: NFC text, keys in code-unit order, and no
-  value without a single byte form. `tests/primitives.test.ts` pins the bytes
-  against an independent SHA-256.
-- Each envelope file has exactly one valid byte form. A release that re-encodes
-  any file, reorders a record or changes a byte does not verify.
+- `digest(value)` covers canonical JSON: NFC text, keys in code-unit order, and
+  no value without a single byte form. File and change-log digests cover their
+  exact bytes. `tests/primitives.test.ts` pins a canonical preimage against an
+  independent SHA-256.
+- Canonical inputs are finite JSON scalars, dense arrays and plain objects with
+  enumerable data properties. Sparse arrays, accessors, proxies, class instances,
+  symbols, cycles and more than 256 nested containers are rejected. Normalized
+  keys cannot collide. No getters or `toJSON` methods execute during encoding.
+- Each envelope file has exactly one valid byte form. Verification rejects a
+  noncanonical envelope rendering even when its file declarations are rebound.
+  The transport-only `verifyFiles` check also enforces canonical bundle bytes:
+  the bundle cannot declare itself, so this closes its otherwise unlisted file.
+- Envelope JSON is compact canonical JSON followed by one newline; the change
+  log uses the same encoding per line, including adapter payloads. Object bytes
+  belong to adapters and are preserved exactly. A file cannot also be a directory.
 - Releases form a chain: genesis is sequence one, each successor names its exact
   parent at the next sequence, and policy time never moves backwards.
 - Sealing and verification are pure. They never touch the filesystem, so they
@@ -60,6 +70,25 @@ and forges every binding to prove verification refuses it.
 
 Contract identifiers, signature domains and signature purposes are signed
 bytes. Once evidence is signed under one, it never changes.
+
+`writeReleaseFiles` validates the whole tree and stages every write before
+replacing a build directory. It restores prior output if installation fails;
+writers to the same directory must be serialized. This is a build operation,
+not an atomic swap for a live serving directory. `declareTree` hashes files
+through bounded streams instead of retaining every input byte in memory.
+
+`createPublicationPreparation` returns the installed verifier's typed result
+alongside the delivery it checked. A product can retain that interpretation for
+one publication operation without repeating full verification per member.
+Historical artifacts must still be interpreted by their exact bound verifier;
+changing envelope encoding requires a coordinated current-release cutover.
+
+The installed composition and its trust roots are inputs to verification.
+Envelope verification proves byte closure, ownership, identities and successor
+bindings; it does not establish that an adapter's domain claims are true.
+Products own those validators, their policies and their interpretation of
+evidence. A hosted platform may orchestrate them without becoming another
+authority for their schemas or canonical encoding.
 
 ## Development
 

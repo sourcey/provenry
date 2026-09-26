@@ -1,6 +1,8 @@
 import type { z } from "zod";
 import {
+  assertPublicationFilePaths,
   encodePublicationChanges,
+  encodePublicationJson,
   isCanonicalPublicationPath,
   isPublicationEnvelopePath,
   isPublicationEnvelopeSchemas,
@@ -19,7 +21,6 @@ import {
   type Digest,
   digest,
   parseJsonFile,
-  prettyJson,
   requiredFile,
   sha256Bytes,
 } from "../../primitives/src/index.js";
@@ -117,6 +118,9 @@ function verifyPublicationFiles<Bundle extends PublicationBundleFields>(
     bundleSchema,
     parseJsonFile(releaseFiles, PUBLICATION_ENVELOPE_FILES.bundle, RELEASE),
   );
+  // The bundle cannot declare its own bytes. Its canonical rendering is what
+  // closes that last file, including for transport-only verification.
+  assertRendering(releaseFiles, PUBLICATION_ENVELOPE_FILES.bundle, bundle);
   // The release holds the bundle plus exactly the declared files: equal counts and
   // every declaration present make the two sets equal.
   const declared = Object.keys(bundle.files).sort(compareCanonicalStrings);
@@ -126,6 +130,7 @@ function verifyPublicationFiles<Bundle extends PublicationBundleFields>(
   ) {
     throw new Error("Publication file set does not match its immutable declaration.");
   }
+  assertPublicationFilePaths([...declared, PUBLICATION_ENVELOPE_FILES.bundle]);
   const files = new Map<string, Buffer>();
   for (const path of declared) {
     const bytes = releaseFiles.get(path);
@@ -176,6 +181,10 @@ export function createPublicationEnvelope<
       throw new Error(`Publication state file ${path} must lie outside the envelope and adapters.`);
     }
   }
+  assertPublicationFilePaths([
+    ...Object.values(PUBLICATION_ENVELOPE_FILES),
+    ...(input.stateFiles ?? []),
+  ]);
 
   type ChangeRecord = z.output<Change>;
 
@@ -187,7 +196,7 @@ export function createPublicationEnvelope<
     sealInput: PublicationSealInput<Contracts, Change>,
   ) => {
     const snapshot = schemas.snapshotCore.parse({
-      ...sealInput.snapshotCore,
+      ...JSON.parse(canonicalJson(sealInput.snapshotCore)),
       resource_digests: sortedRecord(sealInput.snapshotCore.resource_digests),
     });
     const resourceDigests = sortedRecord(sealInput.resourceDigests);
@@ -204,7 +213,7 @@ export function createPublicationEnvelope<
       diff_contract: contracts.diff,
       parent_snapshot_id: sealInput.parent?.snapshotId ?? null,
       snapshot_id: snapshotId,
-      changes: orderPublicationChanges(sealInput.changes),
+      changes: JSON.parse(canonicalJson(orderPublicationChanges(sealInput.changes))),
     });
     assertSealedChanges(diff.changes);
     const releaseCore = schemas.releaseCore.parse({
@@ -225,8 +234,8 @@ export function createPublicationEnvelope<
     const envelopeFiles = new Map<string, string | Buffer>([
       [PUBLICATION_ENVELOPE_FILES.manifest, manifestBytes],
       [PUBLICATION_ENVELOPE_FILES.changes, encodePublicationChanges(diff.changes)],
-      [PUBLICATION_ENVELOPE_FILES.diff, prettyJson(diff)],
-      [PUBLICATION_ENVELOPE_FILES.descriptor, prettyJson(descriptor)],
+      [PUBLICATION_ENVELOPE_FILES.diff, encodePublicationJson(diff)],
+      [PUBLICATION_ENVELOPE_FILES.descriptor, encodePublicationJson(descriptor)],
     ]);
     for (const [path, bytes] of sealInput.stateFiles ?? []) {
       if (!stateFiles.has(path)) throw new Error(`Publication state file ${path} is undeclared.`);
@@ -248,7 +257,7 @@ export function createPublicationEnvelope<
     return Object.freeze({
       files: new Map([...objects, ...envelopeFiles]) as ReadonlyMap<string, string | Buffer>,
       bundle,
-      bundleBytes: prettyJson(bundle),
+      bundleBytes: encodePublicationJson(bundle),
       descriptor,
       diff,
     });
@@ -277,20 +286,28 @@ export function createPublicationEnvelope<
 
     /** Fix exactly the owned objects of one release before any envelope bytes exist. */
     begin(input: ReadonlyMap<string, string | Buffer>) {
-      const objects = new Map<string, string | Buffer>();
-      for (const [path, bytes] of input) {
+      for (const path of input.keys()) {
         if (isPublicationEnvelopePath(path) || stateFiles.has(path)) {
           throw new Error(`Publication object ${path} uses an envelope or state path.`);
         }
+      }
+      assertPublicationFilePaths([
+        ...Object.values(PUBLICATION_ENVELOPE_FILES),
+        ...stateFiles,
+        ...input.keys(),
+      ]);
+      ownership.assertOwned(input.keys());
+      const objects = new Map<string, string | Buffer>();
+      for (const [path, bytes] of input) {
         objects.set(path, typeof bytes === "string" ? bytes : Buffer.from(bytes));
       }
-      ownership.assertOwned(objects.keys());
       const manifest = schemas.objectManifest.parse({
         manifest_contract: contracts.manifest,
         objects: declarations(objects),
       });
-      const manifestDigest = digest(manifest);
-      const manifestBytes = prettyJson(manifest);
+      const manifestCanonical = canonicalJson(manifest);
+      const manifestDigest = sha256Bytes(manifestCanonical);
+      const manifestBytes = `${manifestCanonical}\n`;
       return Object.freeze({
         manifest,
         manifestDigest,
@@ -315,7 +332,6 @@ export function createPublicationEnvelope<
      */
     verify(releaseFiles: ReadonlyMap<string, Buffer>) {
       const { bundle, files } = verifyPublicationFiles(schemas.bundle, releaseFiles);
-      assertRendering(releaseFiles, PUBLICATION_ENVELOPE_FILES.bundle, bundle);
       ownership.assertResources(bundle.resource_digests);
       ownership.assertResources(bundle.release.snapshot_core.resource_digests);
       assertCanonicalKeys(bundle.files, "file declarations");
@@ -335,9 +351,13 @@ export function createPublicationEnvelope<
       const manifest = schemas.objectManifest.parse(
         parseJsonFile(files, PUBLICATION_ENVELOPE_FILES.manifest, RELEASE),
       );
-      assertRendering(files, PUBLICATION_ENVELOPE_FILES.manifest, manifest);
+      const manifestCanonical = assertRendering(
+        files,
+        PUBLICATION_ENVELOPE_FILES.manifest,
+        manifest,
+      );
       assertCanonicalKeys(manifest.objects, "object declarations");
-      if (digest(manifest) !== bundle.object_manifest_digest) {
+      if (sha256Bytes(manifestCanonical) !== bundle.object_manifest_digest) {
         throw new Error("Publication object manifest is not the manifest the bundle binds.");
       }
       const presentStateFiles = new Map<string, Buffer>();
@@ -475,8 +495,10 @@ function assertCanonicalUnique(values: readonly string[], label: string): void {
 }
 
 /** Each envelope file has exactly one valid byte form: the rendering the engine seals. */
-function assertRendering(files: ReadonlyMap<string, Buffer>, path: string, value: unknown): void {
-  if (!requiredFile(files, path, RELEASE).equals(Buffer.from(prettyJson(value), "utf8"))) {
+function assertRendering(files: ReadonlyMap<string, Buffer>, path: string, value: unknown): string {
+  const canonical = canonicalJson(value);
+  if (!requiredFile(files, path, RELEASE).equals(Buffer.from(`${canonical}\n`, "utf8"))) {
     throw new Error(`Publication release file ${path} is not its exact canonical rendering.`);
   }
+  return canonical;
 }
