@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { sealCaptureAttempt, verifyCaptureAttempt } from "../modules/capture/src/attempts.js";
+import {
+  captureAttemptCoreSchema,
+  sealCaptureAttempt,
+  verifyCaptureAttempt,
+} from "../modules/capture/src/attempts.js";
 import {
   createCaptureMethodRegistry,
   createCaptureMethodRegistryDirectory,
@@ -94,6 +98,20 @@ test("physical attempts separate archive evidence time from retrieval and refuse
       }),
     /Unsupported capture method/u,
   );
+});
+
+test("malformed capture URLs return a validation failure", () => {
+  const parsed = captureAttemptCoreSchema.safeParse({
+    source_url: "not-a-url",
+    requested_url: "https://example.com",
+    checked_at: "2026-09-27T00:00:00Z",
+    method: { name: "manual", version: "1" },
+    method_registry_digest: captureMethodRegistry.registryDigest,
+    outcome: "manual_imported",
+    content_digest: `sha256:${"a".repeat(64)}`,
+    content_bytes: 1,
+  });
+  assert.equal(parsed.success, false);
 });
 
 test("off-authority redirects retain their exact chain without becoming evidence", () => {

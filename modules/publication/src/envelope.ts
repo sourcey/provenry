@@ -20,6 +20,7 @@ import {
   compareInstants,
   type Digest,
   digest,
+  isDigest,
   parseJsonFile,
   requiredFile,
   sha256Bytes,
@@ -65,14 +66,21 @@ export interface PublicationDescriptorFields {
 export function verifyPublicationDescriptor(descriptor: PublicationDescriptorFields): void {
   const { snapshot_core: snapshot, release_core: release } = descriptor;
   if (
+    !Number.isSafeInteger(snapshot.release_sequence) ||
+    snapshot.release_sequence < 1 ||
+    !Number.isSafeInteger(release.release_sequence) ||
+    !isDigest(descriptor.snapshot_id) ||
+    !isDigest(descriptor.release_id) ||
+    (release.parent_release_id !== null && !isDigest(release.parent_release_id)) ||
     digest(snapshot) !== descriptor.snapshot_id ||
     digest(release) !== descriptor.release_id ||
     release.snapshot_id !== descriptor.snapshot_id ||
     release.release_sequence !== snapshot.release_sequence ||
-    (release.parent_release_id === null && release.release_sequence !== 1)
+    (release.parent_release_id === null) !== (release.release_sequence === 1)
   ) {
     throw new Error("Publication release descriptor is not one exact canonical release.");
   }
+  compareInstants(snapshot.policy_as_of, snapshot.policy_as_of);
 }
 
 /** The parent binding a successor of this descriptor must name, once the descriptor is proven. */
@@ -92,9 +100,16 @@ export function assertPublicationPosition(input: {
   readonly policyAsOf: string;
   readonly parent: PublicationParent | null;
 }): void {
+  if (!Number.isSafeInteger(input.releaseSequence) || input.releaseSequence < 1) {
+    throw new Error("Release sequence must be a positive safe integer.");
+  }
+  compareInstants(input.policyAsOf, input.policyAsOf);
   if (!input.parent) {
     if (input.releaseSequence !== 1) throw new Error("Genesis release sequence must be one.");
     return;
+  }
+  if (!Number.isSafeInteger(input.parent.releaseSequence) || input.parent.releaseSequence < 1) {
+    throw new Error("Parent release sequence must be a positive safe integer.");
   }
   if (input.releaseSequence !== input.parent.releaseSequence + 1) {
     throw new Error("Release sequence must be exactly the parent sequence plus one.");
@@ -239,7 +254,7 @@ export function createPublicationEnvelope<
     ]);
     for (const [path, bytes] of sealInput.stateFiles ?? []) {
       if (!stateFiles.has(path)) throw new Error(`Publication state file ${path} is undeclared.`);
-      envelopeFiles.set(path, bytes);
+      envelopeFiles.set(path, typeof bytes === "string" ? bytes : Buffer.from(bytes));
     }
     const core = {
       bundle_contract: contracts.bundle,
@@ -305,14 +320,31 @@ export function createPublicationEnvelope<
         manifest_contract: contracts.manifest,
         objects: declarations(objects),
       });
+      for (const declaration of Object.values(manifest.objects)) Object.freeze(declaration);
+      Object.freeze(manifest.objects);
+      Object.freeze(manifest);
       const manifestCanonical = canonicalJson(manifest);
       const manifestDigest = sha256Bytes(manifestCanonical);
       const manifestBytes = `${manifestCanonical}\n`;
+      // The first successful seal transfers these private buffers into its
+      // release. A second seal would let a caller mutate the first release's
+      // buffers through the same draft and produce a stale declaration.
+      let pendingObjects: Map<string, string | Buffer> | null = objects;
       return Object.freeze({
         manifest,
         manifestDigest,
-        seal: (sealInput: PublicationSealInput<Contracts, Change>) =>
-          seal(objects, manifest.objects, manifestDigest, manifestBytes, sealInput),
+        seal: (sealInput: PublicationSealInput<Contracts, Change>) => {
+          if (pendingObjects === null) throw new Error("Publication draft is already sealed.");
+          const sealed = seal(
+            pendingObjects,
+            manifest.objects,
+            manifestDigest,
+            manifestBytes,
+            sealInput,
+          );
+          pendingObjects = null;
+          return sealed;
+        },
       });
     },
 

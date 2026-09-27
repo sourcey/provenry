@@ -84,6 +84,22 @@ test("a signed capture binds the exact physical result and historical signer", a
     attestation,
   );
   await assert.rejects(
+    attestCaptureAttempt({
+      registries,
+      start,
+      result,
+      signedAt: "2026-09-25T10:01:00Z",
+      trust,
+      signer: {
+        async signCaptureAttempt({ core }) {
+          Object.assign(core, { signed_at: "2026-09-25T10:02:00Z" });
+          throw new Error("Signer must not reach this statement.");
+        },
+      },
+    }),
+    TypeError,
+  );
+  await assert.rejects(
     verifyCaptureAttemptAttestation({
       registries,
       start,
@@ -105,5 +121,39 @@ test("a signed capture binds the exact physical result and historical signer", a
       trust,
     }),
     /signature/u,
+  );
+  // A 64-byte ECDSA signature can otherwise satisfy the base64 length check
+  // and Node's verify(null, ...) call despite an ed25519 protected header.
+  const ecKeys = generateKeyPairSync("ec", { namedCurve: "secp224r1" });
+  const preimage = captureAttemptAttestationSignaturePreimage({
+    core: {
+      attestation_contract: attestation.attestation_contract,
+      capture_key: attestation.capture_key,
+      start_digest: attestation.start_digest,
+      attempt_digest: attestation.attempt_digest,
+      method_registry_digest: attestation.method_registry_digest,
+      signed_at: attestation.signed_at,
+    },
+    attestationDigest: attestation.attestation_digest,
+    header,
+  });
+  let ecSignature = "";
+  for (let trial = 0; trial < 100 && !ecSignature; trial++) {
+    const candidate = sign(null, preimage, ecKeys.privateKey);
+    if (candidate.byteLength === 64) ecSignature = candidate.toString("base64");
+  }
+  assert.ok(ecSignature, "probe must find a 64-byte ECDSA signature");
+  await assert.rejects(
+    verifyCaptureAttemptAttestation({
+      registries,
+      start,
+      result,
+      attestation: { ...attestation, protected: { ...header, signature: ecSignature } },
+      trust: {
+        resolveCaptureAttemptPublicKey: () =>
+          ecKeys.publicKey.export({ type: "spki", format: "pem" }).toString(),
+      },
+    }),
+    /requires an Ed25519 public key/u,
   );
 });

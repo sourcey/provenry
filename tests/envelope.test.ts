@@ -358,6 +358,23 @@ test("a successor chains owned resources and binds the exact parent", () => {
     () => publicationParent({ ...genesis.descriptor, release_id: emptyIndex }),
     /not one exact canonical release/u,
   );
+  const zeroSnapshot = { ...genesis.descriptor.snapshot_core, release_sequence: 0 };
+  const zeroRelease = {
+    ...genesis.descriptor.release_core,
+    release_sequence: 0,
+    snapshot_id: digest(zeroSnapshot),
+  };
+  assert.throws(
+    () =>
+      publicationParent({
+        ...genesis.descriptor,
+        snapshot_core: zeroSnapshot,
+        snapshot_id: digest(zeroSnapshot),
+        release_core: zeroRelease,
+        release_id: digest(zeroRelease),
+      }),
+    /not one exact canonical release/u,
+  );
   assert.deepEqual(publicationParent(genesis.descriptor), {
     releaseId: genesis.descriptor.release_id,
     snapshotId: genesis.descriptor.snapshot_id,
@@ -459,7 +476,7 @@ test("sealing fixes its inputs and renders resources in canonical order", () => 
     "note-index",
   ]);
   assert.deepEqual(Object.keys(sealed.bundle.resource_digests), ["author-index", "note-policy"]);
-  const reordered = draft.seal({
+  const reordered = envelope.begin(new Map([["notes/n1.json", "{}"]])).seal({
     ...base,
     snapshotCore: {
       ...snapshotCore,
@@ -502,48 +519,86 @@ test("sealing refuses unowned objects, undeclared state, unsealed or foreign cha
     verifierDigest,
     resourceDigests: {},
   };
+  const seal = (input: Parameters<typeof draft.seal>[0]) =>
+    envelope.begin(new Map([["notes/n1.json", "{}"]])).seal(input);
   assert.ok(draft.seal(base).bundle.bundle_digest);
+  assert.throws(() => draft.seal(base), /already sealed/u);
+  assert.throws(() => {
+    Object.assign(draft.manifest.objects["notes/n1.json"] as object, { bytes: 1 });
+  }, TypeError);
+  const stateBytes = Buffer.from("{}");
+  const stateDraft = envelope.begin(new Map([["notes/n1.json", Buffer.from("{}")]]));
+  const withState = stateDraft.seal({
+    ...base,
+    stateFiles: new Map([["journal.json", stateBytes]]),
+  });
+  stateBytes[0] = 120;
+  envelope.verify(asBuffers(withState.files, withState.bundleBytes));
   assert.throws(
-    () => draft.seal({ ...base, stateFiles: new Map([["other.json", "{}"]]) }),
+    () => seal({ ...base, stateFiles: new Map([["other.json", "{}"]]) }),
     /state file other.json is undeclared/u,
   );
   assert.throws(
-    () => draft.seal({ ...base, snapshotCore: { ...base.snapshotCore, release_sequence: 2 } }),
+    () => seal({ ...base, snapshotCore: { ...base.snapshotCore, release_sequence: 2 } }),
     /Genesis release sequence must be one/u,
   );
   assert.throws(
     () =>
-      draft.seal({
+      seal({
         ...base,
         snapshotCore: { ...base.snapshotCore, resource_digests: { "photo-index": emptyIndex } },
       }),
     /unregistered resource photo-index/u,
   );
   assert.throws(
-    () => draft.seal({ ...base, resourceDigests: { "photo-policy": emptyIndex } }),
+    () => seal({ ...base, resourceDigests: { "photo-policy": emptyIndex } }),
     /unregistered resource photo-policy/u,
   );
   assert.throws(
     () =>
-      draft.seal({
+      seal({
         ...base,
         admittedInputDigests: [notePolicyDigest, emptyIndex].sort().reverse(),
       }),
     /unique and canonically ordered/u,
   );
   assert.throws(
-    () => draft.seal({ ...base, admittedInputDigests: [emptyIndex, emptyIndex] }),
+    () => seal({ ...base, admittedInputDigests: [emptyIndex, emptyIndex] }),
     /unique and canonically ordered/u,
   );
   const unsealed = { ...noteChange("note.added", "n1", {}), kind: "note.retired" };
-  assert.throws(
-    () => draft.seal({ ...base, changes: [unsealed] }),
-    /not sealed over its exact payload/u,
-  );
+  assert.throws(() => seal({ ...base, changes: [unsealed] }), /not sealed over its exact payload/u);
   const duplicate = noteChange("note.updated", "n1", { title: "other" });
   assert.throws(
-    () => draft.seal({ ...base, changes: [noteChange("note.added", "n1", {}), duplicate] }),
+    () => seal({ ...base, changes: [noteChange("note.added", "n1", {}), duplicate] }),
     /multiple changes for note n1/u,
+  );
+});
+
+test("installed contract identifiers cannot change after schema construction", () => {
+  const mutableContracts: Record<keyof typeof contracts, string> = { ...contracts };
+  const installed = createPublicationEnvelope({
+    schemas: publicationEnvelopeSchemas(mutableContracts, change),
+    ownership,
+  });
+  const before = installed.resourceTransitionDigest("note-index", emptyIndex, []);
+  mutableContracts.resourceTransition = "changed.resource-transition/test";
+  assert.equal(installed.resourceTransitionDigest("note-index", emptyIndex, []), before);
+  assert.throws(() => {
+    mutableContracts.manifest = "changed.manifest/test";
+    Object.assign(installed.schemas.contracts, { manifest: mutableContracts.manifest });
+  }, TypeError);
+  assert.throws(
+    () => publicationEnvelopeSchemas({ ...contracts, extra: "unexpected" }, change),
+    /exactly eight contract identifiers/u,
+  );
+  assert.throws(
+    () =>
+      publicationEnvelopeSchemas(
+        { ...contracts, bundle: undefined } as unknown as typeof contracts,
+        change,
+      ),
+    /nonempty identifiers/u,
   );
 });
 

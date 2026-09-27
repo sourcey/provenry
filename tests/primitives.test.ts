@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   canonicalJson,
   compareCanonicalStrings,
+  compareInstants,
   digest,
   MAX_CANONICAL_JSON_DEPTH,
   sha256Bytes,
@@ -18,6 +19,14 @@ test("canonical JSON is NFC text with keys in code-unit order", () => {
   );
   assert.equal(digest(value), sha256Bytes(canonicalJson(value)));
   assert.equal(canonicalJson({ "\u{1f600}": 1, "￿": 2, "퟿": 3 }), '{"퟿":3,"😀":1,"￿":2}');
+});
+
+test("instant comparison preserves every accepted fractional digit across offsets", () => {
+  assert.ok(compareInstants("2026-09-27T10:00:00.0001Z", "2026-09-27T10:00:00.0009Z") < 0);
+  assert.equal(compareInstants("2026-09-27T11:00:00.1+01:00", "2026-09-27T10:00:00.100Z"), 0);
+  assert.ok(compareInstants("2026-09-27T10:00:01Z", "2026-09-27T10:00:00.999999Z") > 0);
+  assert.throws(() => compareInstants("invalid", "2026-09-27T10:00:00Z"), TypeError);
+  assert.throws(() => compareInstants("2026-02-30T10:00:00Z", "2026-09-27T10:00:00Z"), TypeError);
 });
 
 test("canonical JSON never silently drops data or executes accessors", () => {

@@ -1,9 +1,19 @@
 # Provenry
 
-Provenry is a facts engine. It seals records into releases that anyone can
-verify from the files alone, with no hosted service in the loop. A product
-composes it with its own record types, policies and adapters; Provenry owns the
-canonical bytes, the digests and the rules that bind a release together.
+Provenry is an offline verification engine for canonical records, signed
+capture attestations and linked releases. A product composes it with its own
+record types, policies, trust roots and adapters; Provenry owns the canonical
+bytes, digests and rules that bind a release together. Verification of those
+bindings does not establish the truth of a product's factual claims.
+
+The [format contract](FORMAT.md) states the exact byte preimages, verification
+stages, mutation boundaries and read limits. A [standalone example](examples/basic.mjs)
+builds and verifies a neutral release through package exports.
+
+After the first registry publication, install the prerelease with
+`npm install provenry@next zod@4.4.3` and run
+`node node_modules/provenry/examples/basic.mjs`. The engine requires Node.js
+22.12.0 or newer.
 
 | Module | Owns |
 | --- | --- |
@@ -31,9 +41,10 @@ A product composes the engine; it never forks it.
    live outside the object manifest.
 4. Build a release: `begin(objects)` fixes the object manifest, each adapter
    chains its resource states with `resourceTransitionDigest`, and `seal(...)`
-   produces the change log, diff, descriptor and bundle. `writeReleaseFiles`
+   consumes that draft and produces the change log, diff, descriptor and bundle.
+   `writeReleaseFiles`
    (`provenry/publication/objects`) writes the exact bytes.
-5. Verify a release: `readReleaseFiles` reads it back, `verify(files)` checks
+5. Verify a release: bounded `readReleaseFiles` reads it back, `verify(files)` checks
    every envelope binding and that an installed adapter owns every object, and
    `assertSuccessor` binds it to the parent that `publicationParent(descriptor)`
    names once `verifyPublicationDescriptor` has proven that descriptor. Adapters
@@ -77,6 +88,11 @@ writers to the same directory must be serialized. This is a build operation,
 not an atomic swap for a live serving directory. `declareTree` hashes files
 through bounded streams instead of retaining every input byte in memory.
 
+`readReleaseFiles` applies default file and byte limits. Products with larger
+releases must supply an explicit `PublicationReadLimits` budget and provision
+memory for the complete file map. Returned buffers remain mutable; admission
+and custody must verify the exact bytes they use.
+
 `createPublicationPreparation` returns the installed verifier's typed result
 alongside the delivery it checked. A product can retain that interpretation for
 one publication operation without repeating full verification per member.
@@ -93,6 +109,9 @@ authority for their schemas or canonical encoding.
 ## Development
 
 Run `npm ci && npm run verify` to typecheck, lint, test, build and check every
-package export.
+package export. `node examples/basic.mjs` exercises the published subpath API.
+See [contribution guidance](CONTRIBUTING.md), [security reporting](SECURITY.md)
+and the [release procedure](RELEASING.md). The current package is a prerelease
+candidate; product installations pin exact source revisions.
 
 Provenry is released under the [MIT license](LICENSE).

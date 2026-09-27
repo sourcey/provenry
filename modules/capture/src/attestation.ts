@@ -132,7 +132,7 @@ export async function attestCaptureAttempt(input: {
   readonly signer: CaptureAttemptAttestationSigner;
   readonly trust: CaptureAttemptAttestationTrust;
 }): Promise<CaptureAttemptAttestation> {
-  const core = captureAttemptAttestationCore(input);
+  const core = Object.freeze(captureAttemptAttestationCore(input));
   const attestationDigest = digest(core);
   const response = await input.signer.signCaptureAttempt({ core, attestationDigest });
   const attestation = captureAttemptAttestationSchema.parse({
@@ -192,11 +192,15 @@ async function assertAttestationSignature(
     signerRegistryDigest: header.signer_registry_digest,
     signedAt: attestation.signed_at,
   });
+  const publicKey = createPublicKey(publicKeyPem);
+  if (publicKey.asymmetricKeyType !== "ed25519") {
+    throw new Error("Capture attempt attestation requires an Ed25519 public key.");
+  }
   if (
     !verify(
       null,
       signaturePreimage(attestation.attestation_digest, header),
-      createPublicKey(publicKeyPem),
+      publicKey,
       Buffer.from(signature, "base64"),
     )
   ) {

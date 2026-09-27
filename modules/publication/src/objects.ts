@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { createReadStream } from "node:fs";
+import { constants, createReadStream } from "node:fs";
 import {
   lstat,
   mkdir,
@@ -21,6 +21,19 @@ import { type PublicationFileDeclaration, sortedDeclarations } from "./declarati
 
 /** Files read or written at once; enough to hide I/O latency without flooding descriptors. */
 const FILE_CONCURRENCY = 16;
+
+export interface PublicationReadLimits {
+  readonly maxFiles: number;
+  readonly maxFileBytes: number;
+  readonly maxTotalBytes: number;
+}
+
+/** Conservative defaults; instances with larger releases must declare their budget. */
+export const DEFAULT_PUBLICATION_READ_LIMITS: PublicationReadLimits = Object.freeze({
+  maxFiles: 200_000,
+  maxFileBytes: 128 * 1024 * 1024,
+  maxTotalBytes: 256 * 1024 * 1024,
+});
 
 /**
  * Materialize a build output. Validate the complete tree and finish every write
@@ -97,8 +110,21 @@ export async function writeReleaseFiles(
   }
 }
 
-/** Read every regular file of a materialized release, keyed in canonical path order. */
-export async function readReleaseFiles(directory: string): Promise<Map<string, Buffer>> {
+/** Read a release within an explicit file and byte budget. */
+export async function readReleaseFiles(
+  directory: string,
+  limits: PublicationReadLimits = DEFAULT_PUBLICATION_READ_LIMITS,
+): Promise<Map<string, Buffer>> {
+  if (
+    [limits.maxFiles, limits.maxFileBytes, limits.maxTotalBytes].some(
+      (limit) => !Number.isSafeInteger(limit) || limit <= 0,
+    )
+  ) {
+    throw new TypeError("Publication read limits must be positive safe integers.");
+  }
+  if (typeof constants.O_NOFOLLOW !== "number") {
+    throw new Error("Publication release reading requires filesystem no-follow support.");
+  }
   const root = resolve(directory);
   if ((await lstat(root)).isSymbolicLink()) {
     throw new Error(`Publication release root is a symlink: ${directory}.`);
@@ -110,12 +136,36 @@ export async function readReleaseFiles(directory: string): Promise<Map<string, B
     for (const entry of entries) {
       const path = relativeDirectory ? `${relativeDirectory}/${entry.name}` : entry.name;
       if (entry.isDirectory()) await visit(path);
-      else if (entry.isFile()) paths.push(path);
-      else throw new Error(`Publication release contains a non-regular file: ${path}.`);
+      else if (entry.isFile()) {
+        paths.push(path);
+        if (paths.length > limits.maxFiles)
+          throw new Error("Publication release exceeds its file limit.");
+      } else throw new Error(`Publication release contains a non-regular file: ${path}.`);
     }
   };
   await visit("");
-  const contents = await mapLimit(paths, FILE_CONCURRENCY, (path) => readFile(join(root, path)));
+  assertPublicationFilePaths(paths);
+  let totalBytes = 0;
+  const contents = await mapLimit(paths, FILE_CONCURRENCY, async (path) => {
+    const filename = join(root, path);
+    const status = await lstat(filename);
+    if (!status.isFile())
+      throw new Error(`Publication release contains a non-regular file: ${path}.`);
+    if (status.size > limits.maxFileBytes || status.size > limits.maxTotalBytes - totalBytes) {
+      throw new Error(`Publication release exceeds its byte limit at ${path}.`);
+    }
+    totalBytes += status.size;
+    // Release directories are immutable custody inputs. Preflight keeps a
+    // stable file within budget. No-follow refuses a substituted file symlink;
+    // nonblocking avoids hanging on a substituted FIFO.
+    const bytes = await readFile(filename, {
+      flag: constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+    });
+    if (bytes.byteLength !== status.size) {
+      throw new Error(`Publication release file changed while reading: ${path}.`);
+    }
+    return bytes;
+  });
   return new Map(paths.map((path, index) => [path, contents[index] as Buffer]));
 }
 

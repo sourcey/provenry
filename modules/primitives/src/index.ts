@@ -14,6 +14,7 @@ export type Digest = `sha256:${string}`;
 export type OperationId = `op_${string}`;
 
 const CROCKFORD = "0123456789abcdefghjkmnpqrstvwxyz";
+const INSTANT_PATTERN = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d+))?(Z|[+-]\d{2}:\d{2})$/u;
 
 /** Depth-first visit of every string in a JSON-shaped value, with its path. */
 export function visitStrings(
@@ -46,12 +47,34 @@ export function compareCanonicalStrings(left: string, right: string): number {
 }
 
 export function compareInstants(left: string, right: string): number {
-  const leftTime = Date.parse(left);
-  const rightTime = Date.parse(right);
+  const leftParts = INSTANT_PATTERN.exec(left);
+  const rightParts = INSTANT_PATTERN.exec(right);
+  if (!leftParts || !rightParts) {
+    throw new TypeError("Instant comparison requires valid ISO-8601 values.");
+  }
+  for (const parts of [leftParts, rightParts]) {
+    const unoffset = new Date(`${parts[1]}Z`);
+    if (!Number.isFinite(unoffset.getTime()) || unoffset.toISOString().slice(0, 19) !== parts[1]) {
+      throw new TypeError("Instant comparison requires valid ISO-8601 values.");
+    }
+  }
+  // Date.parse discards precision after milliseconds. Parse whole seconds only,
+  // then compare every fractional digit of the accepted timestamp.
+  const leftTime = Date.parse(`${leftParts[1]}${leftParts[3]}`);
+  const rightTime = Date.parse(`${rightParts[1]}${rightParts[3]}`);
   if (!Number.isFinite(leftTime) || !Number.isFinite(rightTime)) {
     throw new TypeError("Instant comparison requires valid ISO-8601 values.");
   }
-  return leftTime - rightTime;
+  if (leftTime !== rightTime) return leftTime - rightTime;
+  const leftFraction = leftParts[2] ?? "";
+  const rightFraction = rightParts[2] ?? "";
+  const length = Math.max(leftFraction.length, rightFraction.length);
+  for (let index = 0; index < length; index++) {
+    const difference =
+      (leftFraction.charCodeAt(index) || 48) - (rightFraction.charCodeAt(index) || 48);
+    if (difference !== 0) return difference;
+  }
+  return 0;
 }
 
 export function sha256Bytes(bytes: Uint8Array | string): Digest {

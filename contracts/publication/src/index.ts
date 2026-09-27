@@ -268,11 +268,12 @@ export function publicationChangeSchema<
   readonly subjectTypes: SubjectTypes;
   readonly tombstone: Tombstone;
 }) {
+  const subjectTypes = Object.freeze([...input.subjectTypes]) as unknown as SubjectTypes;
   const schema = z
     .object({
       change_id: digest,
       kind: input.kind,
-      subject_type: z.enum(input.subjectTypes),
+      subject_type: z.enum(subjectTypes),
       subject_id: z.union([identifier, digest]),
       revision_digest: digest.optional(),
       previous_revision_digest: digest.optional(),
@@ -282,10 +283,7 @@ export function publicationChangeSchema<
       tombstone: input.tombstone.optional(),
     })
     .strict();
-  changeSubjectTypes.set(
-    schema,
-    Object.freeze([...input.subjectTypes].sort(compareCanonicalStrings)),
-  );
+  changeSubjectTypes.set(schema, Object.freeze([...subjectTypes].sort(compareCanonicalStrings)));
   return schema;
 }
 
@@ -321,7 +319,26 @@ const envelopeSchemaSets = new WeakSet<object>();
 export function publicationEnvelopeSchemas<
   const Contracts extends PublicationEnvelopeContracts,
   const Change extends z.ZodType<PublicationChangeShape>,
->(contracts: Contracts, change: Change) {
+>(inputContracts: Contracts, change: Change) {
+  const contractKeys = [
+    "manifest",
+    "snapshot",
+    "artifact",
+    "release",
+    "descriptor",
+    "diff",
+    "bundle",
+    "resourceTransition",
+  ] as const;
+  if (
+    Object.keys(inputContracts).length !== contractKeys.length ||
+    contractKeys.some((key) => !Object.hasOwn(inputContracts, key))
+  ) {
+    throw new Error("Publication envelope requires exactly eight contract identifiers.");
+  }
+  // Contract identifiers are signed bytes. A caller changing its configuration
+  // after installation must not change the meaning of an installed schema set.
+  const contracts = Object.freeze({ ...inputContracts }) as Contracts;
   const subjectTypes = changeSubjectTypes.get(change);
   if (!subjectTypes) {
     throw new Error("Publication envelope changes must use a publicationChangeSchema vocabulary.");

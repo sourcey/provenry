@@ -184,7 +184,9 @@ export function assertSubjectIdentityClosure(input: {
     }
   }
   for (const [original, replacements] of Object.entries(projection.splitRelationships)) {
-    const continuation = projection.canonicalResolutions[original];
+    const continuation = Object.hasOwn(projection.canonicalResolutions, original)
+      ? projection.canonicalResolutions[original]
+      : undefined;
     if (
       !historical.has(original) ||
       replacements.length === 0 ||

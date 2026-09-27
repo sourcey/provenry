@@ -161,3 +161,21 @@ test("subject identity projection follows later mergers through prior split bran
     currentSubjectIds: new Set(["company_c", "company_d"]),
   });
 });
+
+test("a prototype property name is a valid continuing subject identity", () => {
+  const projection = projectSubjectIdentities({
+    transitions: [
+      {
+        kind: "split",
+        originalSubjectId: "constructor",
+        continuingSubjectId: "constructor",
+        newSubjectIds: ["child_a", "child_b"],
+      },
+    ],
+  });
+  assertSubjectIdentityClosure({
+    projection,
+    historicalSubjectIds: new Set(["constructor"]),
+    currentSubjectIds: new Set(["constructor", "child_a", "child_b"]),
+  });
+});

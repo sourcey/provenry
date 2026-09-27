@@ -1,13 +1,36 @@
 {
   "name": "provenry",
-  "version": "0.0.0",
+  "version": "0.1.0-alpha.1",
   "description": "Facts engine: canonical records, capture attestation and verifiable release envelopes",
   "license": "MIT",
-  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sourcey/provenry.git"
+  },
+  "homepage": "https://github.com/sourcey/provenry#readme",
+  "bugs": "https://github.com/sourcey/provenry/issues",
+  "publishConfig": {
+    "access": "public",
+    "tag": "next"
+  },
+  "keywords": [
+    "provenance",
+    "attestation",
+    "verifiable-records",
+    "publication"
+  ],
   "packageManager": "npm@11.19.1",
   "files": [
     "dist/modules",
-    "dist/contracts"
+    "dist/contracts",
+    "modules",
+    "contracts",
+    "examples",
+    "FORMAT.md",
+    "SECURITY.md",
+    "CONTRIBUTING.md",
+    "RELEASING.md",
+    "CHANGELOG.md"
   ],
   "type": "module",
   "engines": {
@@ -73,7 +96,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "tsx --test tests/*.test.ts",
     "lint": "biome check .",
-    "verify": "npm run typecheck && npm run lint && npm test && npm run build && node scripts/check-exports.mjs"
+    "verify": "npm run typecheck && npm run lint && npm test && npm run build && node scripts/check-exports.mjs && node scripts/check-package.mjs"
   },
   "dependencies": {
     "zod": "4.4.3"

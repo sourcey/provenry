@@ -15,7 +15,11 @@ import {
   sealPublicationChange,
 } from "../modules/publication/src/changes.js";
 import { contentAddressedArchiveDelivery } from "../modules/publication/src/delivery.js";
-import { declareTree, writeReleaseFiles } from "../modules/publication/src/objects.js";
+import {
+  declareTree,
+  readReleaseFiles,
+  writeReleaseFiles,
+} from "../modules/publication/src/objects.js";
 
 const verifierDigest = `sha256:${"a".repeat(64)}` as const;
 const bundleDigest = `sha256:${"b".repeat(64)}` as const;
@@ -61,9 +65,10 @@ test("typed changes seal exact domain payloads and sort without mutating input",
 });
 
 test("a second adapter composes typed record changes over its own subjects", () => {
+  const subjects: ["place"] = ["place"];
   const change = publicationChangeSchema({
     kind: z.string().regex(/^place\.(?:added|updated|retired)$/u),
-    subjectTypes: ["place"],
+    subjectTypes: subjects,
     tombstone: z.object({ reason: z.enum(["retired"]) }).strict(),
   });
   const record = {
@@ -75,6 +80,7 @@ test("a second adapter composes typed record changes over its own subjects", () 
     projection_digest: verifierDigest,
     basis_event_ids: [],
   };
+  Object.assign(subjects, { 0: "foreign" });
   assert.deepEqual(change.parse(record), record);
   assert.throws(() => change.parse({ ...record, subject_type: "photo" }));
 });
@@ -270,6 +276,35 @@ test("failed materialization preserves prior output and successful replacement r
     });
     assert.equal(await readFile(join(output, "notes/next"), "utf8"), "next");
     await assert.rejects(readFile(join(output, "retained.txt")), /ENOENT/u);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("release reads enforce file and byte budgets for stable custody inputs", async () => {
+  const root = await mkdtemp(join(tmpdir(), "publication-read-limits-"));
+  try {
+    await writeFile(join(root, "a"), "abc");
+    await writeFile(join(root, "b"), "def");
+    await assert.rejects(
+      readReleaseFiles(root, { maxFiles: 1, maxFileBytes: 10, maxTotalBytes: 10 }),
+      /file limit/u,
+    );
+    await assert.rejects(
+      readReleaseFiles(root, { maxFiles: 2, maxFileBytes: 2, maxTotalBytes: 10 }),
+      /byte limit/u,
+    );
+    await assert.rejects(
+      readReleaseFiles(root, { maxFiles: 2, maxFileBytes: 10, maxTotalBytes: 5 }),
+      /byte limit/u,
+    );
+    assert.deepEqual(
+      [...(await readReleaseFiles(root, { maxFiles: 2, maxFileBytes: 3, maxTotalBytes: 6 }))],
+      [
+        ["a", Buffer.from("abc")],
+        ["b", Buffer.from("def")],
+      ],
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }

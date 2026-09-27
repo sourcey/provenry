@@ -28,8 +28,12 @@ export const captureMethodSchema = z
 
 /** Capture URLs carry neither credentials nor fragments. */
 export function isPlainCaptureUrl(value: string): boolean {
-  const url = new URL(value);
-  return url.username === "" && url.password === "" && url.hash === "";
+  try {
+    const url = new URL(value);
+    return url.username === "" && url.password === "" && url.hash === "";
+  } catch {
+    return false;
+  }
 }
 
 const common = {
