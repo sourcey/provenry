@@ -19,13 +19,12 @@ try {
   assert.ok(packed?.filename, "npm pack must produce one artifact");
   const artifact = join(workspace, packed.filename);
   await access(artifact);
-  // CI has already run npm ci, so these exact dependencies are in its cache.
-  // Offline installation proves the tarball closes without repository paths.
+  // Install the packed bytes from a separate project. Registry resolution is
+  // necessary on a fresh CI runner; npm ci does not populate every packument.
   run(
     "npm",
     [
       "install",
-      "--offline",
       "--ignore-scripts",
       "--no-audit",
       "--no-fund",
