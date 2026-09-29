@@ -1,7 +1,7 @@
 {
   "name": "provenry",
-  "version": "0.1.0-alpha.1",
-  "description": "Facts engine: canonical records, capture attestation and verifiable release envelopes",
+  "version": "0.1.0",
+  "description": "The facts and provenance engine behind Sourcey. Gives published facts a history anyone can verify from the files alone.",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -10,14 +10,16 @@
   "homepage": "https://github.com/sourcey/provenry#readme",
   "bugs": "https://github.com/sourcey/provenry/issues",
   "publishConfig": {
-    "access": "public",
-    "tag": "next"
+    "access": "public"
   },
   "keywords": [
     "provenance",
     "attestation",
     "verifiable-records",
-    "publication"
+    "publication",
+    "canonical-json",
+    "ed25519",
+    "sourcey"
   ],
   "packageManager": "npm@11.19.1",
   "files": [

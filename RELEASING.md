@@ -1,8 +1,8 @@
 # Releasing Provenry
 
-The current package is `0.1.0-alpha.1` and uses the npm `next` distribution
-tag. A signed contract or encoding is never silently rewritten for an earlier
-release. Historical evidence stays with its exact historical verifier. The
+Releases publish to npm under the `latest` distribution tag; a prerelease uses
+`next`. A signed contract or encoding is never silently rewritten for an
+earlier release. Historical evidence stays with its exact historical verifier. The
 source repository and npm account must be public and correctly bound before a
 public provenance claim is made.
 
@@ -17,9 +17,9 @@ public provenance claim is made.
    consumers. Typecheck and exercise publication, capture and readback paths.
    Keep their authored pins unchanged until their own cutover is reviewed.
 4. Make the source commit public, tag the exact package version, and publish the
-   exact reviewed bytes under `next`. Verify the registry tarball, installed
-   exports, repository link and provenance after publication. A tag or package
-   version must never be moved to different bytes.
+   exact reviewed bytes under the release's distribution tag. Verify the
+   registry tarball, installed exports, repository link and provenance after
+   publication. A tag or package version must never be moved to different bytes.
 
 For later versions, configure an npm trusted publisher bound to this GitHub
 repository and a dedicated GitHub-hosted release workflow. npm's trusted
