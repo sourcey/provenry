@@ -1,19 +1,54 @@
 # Provenry
 
-Provenry is an offline verification engine for canonical records, signed
-capture attestations and linked releases. A product composes it with its own
-record types, policies, trust roots and adapters; Provenry owns the canonical
-bytes, digests and rules that bind a release together. Verification of those
-bindings does not establish the truth of a product's factual claims.
+Provenry is the facts and provenance engine behind Sourcey. It gives the facts
+you publish a history anyone can verify from the files alone.
+
+A product composes it with its own record types, policies, trust roots and
+adapters. Provenry owns the canonical bytes, the digests and the rules that
+bind each release to the one before it. Checking a release needs the files and
+the installed composition, and nothing else: no network, no hosted service.
+
+```sh
+npm install provenry zod@4.4.3
+```
+
+Node.js 22.12 or newer, ES modules only.
+
+## Example
+
+[`examples/basic.mjs`](examples/basic.mjs) composes a one-adapter instance,
+seals a genesis release and verifies it from its files. It ships in the
+package:
+
+```sh
+node node_modules/provenry/examples/basic.mjs
+```
+
+```json
+{"bundle_digest":"sha256:78fa2c913c408cf23b606e157be086af340a2b062fe6e2bc2a55fef928aae8f0","release_id":"sha256:bc9094614426c3b2912b43042258f0e39fbf7657a140b88b1db7dfe6848b627f","objects":1}
+```
+
+Those digests are the same on every machine, because every input has exactly
+one byte form. The last step is the one a consumer runs:
+
+```js
+const files = new Map([...sealed.files].map(([path, bytes]) => [path, Buffer.from(bytes)]));
+files.set("bundle.json", Buffer.from(sealed.bundleBytes));
+const verified = envelope.verify(files);
+envelope.assertSuccessor({ descriptor: verified.descriptor, diff: verified.diff, parent: null });
+```
 
 The [format contract](FORMAT.md) states the exact byte preimages, verification
-stages, mutation boundaries and read limits. A [standalone example](examples/basic.mjs)
-builds and verifies a neutral release through package exports.
+stages, mutation boundaries and read limits.
 
-After the first registry publication, install the prerelease with
-`npm install provenry@next zod@4.4.3` and run
-`node node_modules/provenry/examples/basic.mjs`. The engine requires Node.js
-22.12.0 or newer.
+## In production
+
+[Sourcey](https://sourcey.com) seals the releases of its public record of
+software companies with Provenry. Each release page lists the release, its
+parent, the bundle and the verifier that bind it, for example
+[the release published on 28 September 2026](https://sourcey.com/releases/sha256-76028f0d90416b25eef7991f5bf73d65526d789dd5aff1dd1158aef4525d3a09).
+
+## Modules
 
 | Module | Owns |
 | --- | --- |
@@ -25,6 +60,8 @@ After the first registry publication, install the prerelease with
 | `contracts/publication` | Envelope schemas, change vocabulary and the ownership registry of an instance |
 | `publication/envelope` | Sealing and verifying a release: object manifest, change log, diff, descriptor and bundle |
 | `publication/changes`, `publication/objects`, `publication/delivery`, `publication/preparation` | Change ordering, release files on disk, content-addressed delivery, and build-then-verify over installed code |
+
+Each module is a subpath export: `import { digest } from "provenry/primitives"`.
 
 ## Composing an instance
 
@@ -42,13 +79,12 @@ A product composes the engine; it never forks it.
 4. Build a release: `begin(objects)` fixes the object manifest, each adapter
    chains its resource states with `resourceTransitionDigest`, and `seal(...)`
    consumes that draft and produces the change log, diff, descriptor and bundle.
-   `writeReleaseFiles`
-   (`provenry/publication/objects`) writes the exact bytes.
-5. Verify a release: bounded `readReleaseFiles` reads it back, `verify(files)` checks
-   every envelope binding and that an installed adapter owns every object, and
-   `assertSuccessor` binds it to the parent that `publicationParent(descriptor)`
-   names once `verifyPublicationDescriptor` has proven that descriptor. Adapters
-   then verify their own semantics.
+   `writeReleaseFiles` (`provenry/publication/objects`) writes the exact bytes.
+5. Verify a release: bounded `readReleaseFiles` reads it back, `verify(files)`
+   checks every envelope binding and that an installed adapter owns every
+   object, and `assertSuccessor` binds it to the parent that
+   `publicationParent(descriptor)` names once `verifyPublicationDescriptor` has
+   proven that descriptor. Adapters then verify their own semantics.
 
 `tests/envelope.test.ts` is the executable reference: a neutral two-adapter
 fixture that seals, verifies and chains releases through the public API alone,
@@ -74,13 +110,15 @@ and forges every binding to prove verification refuses it.
 - Releases form a chain: genesis is sequence one, each successor names its exact
   parent at the next sequence, and policy time never moves backwards.
 - Sealing and verification are pure. They never touch the filesystem, so they
-  run wherever records are checked; file access lives in
-  `publication/objects`.
-- The engine names no product. `tests/boundary.test.ts` enforces its imports
-  and vocabulary.
+  run wherever records are checked; file access lives in `publication/objects`.
+- Engine source and tests name no product. `tests/boundary.test.ts` enforces
+  their imports and vocabulary, so any product can compose the engine without
+  inheriting another's names.
 
 Contract identifiers, signature domains and signature purposes are signed
 bytes. Once evidence is signed under one, it never changes.
+
+## Files on disk
 
 `writeReleaseFiles` validates the whole tree and stages every write before
 replacing a build directory. It restores prior output if installation fails;
@@ -93,6 +131,8 @@ releases must supply an explicit `PublicationReadLimits` budget and provision
 memory for the complete file map. Returned buffers remain mutable; admission
 and custody must verify the exact bytes they use.
 
+## What verification covers
+
 `createPublicationPreparation` returns the installed verifier's typed result
 alongside the delivery it checked. A product can retain that interpretation for
 one publication operation without repeating full verification per member.
@@ -101,17 +141,21 @@ changing envelope encoding requires a coordinated current-release cutover.
 
 The installed composition and its trust roots are inputs to verification.
 Envelope verification proves byte closure, ownership, identities and successor
-bindings; it does not establish that an adapter's domain claims are true.
-Products own those validators, their policies and their interpretation of
-evidence. A hosted platform may orchestrate them without becoming another
-authority for their schemas or canonical encoding.
+bindings. The product's own validators establish what its records mean, under
+its own policies and its own interpretation of evidence. A hosted platform may
+orchestrate them without becoming another authority for their schemas or
+canonical encoding.
 
 ## Development
 
 Run `npm ci && npm run verify` to typecheck, lint, test, build and check every
-package export. `node examples/basic.mjs` exercises the published subpath API.
-See [contribution guidance](CONTRIBUTING.md), [security reporting](SECURITY.md)
-and the [release procedure](RELEASING.md). The current package is a prerelease
-candidate; product installations pin exact source revisions.
+package export. The verify step also packs the package, installs it in a
+separate project and runs the example against the installed bytes. See
+[contribution guidance](CONTRIBUTING.md), [security reporting](SECURITY.md),
+the [release procedure](RELEASING.md) and the [changelog](CHANGELOG.md).
+
+Provenry follows semantic versioning. Before 1.0, a minor version may change
+the public API. Signed contract identifiers and encodings never change for a
+published release, and product installations pin exact versions.
 
 Provenry is released under the [MIT license](LICENSE).
