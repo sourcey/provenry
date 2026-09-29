@@ -9,7 +9,7 @@ bind each release to the one before it. Checking a release needs the files and
 the installed composition, and nothing else: no network, no hosted service.
 
 ```sh
-npm install provenry zod@4.4.3
+npm install provenry
 ```
 
 Node.js 22.12 or newer, ES modules only.
