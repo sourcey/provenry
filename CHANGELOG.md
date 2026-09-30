@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `examples/basic.output.txt`, the exact output of `examples/basic.mjs`.
+  Verifying the package compares the installed example's output with it byte
+  for byte.
+
 ## 0.1.0 - 2026-09-29
 
 First public release. A portable facts engine with canonical values, identity

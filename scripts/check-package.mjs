@@ -53,12 +53,12 @@ try {
       }
     }
   }
-  const example = JSON.parse(
+  // Every input has one byte form, so the installed example prints exactly
+  // what the repository records beside it.
+  assert.equal(
     run(process.execPath, [join(installed, "examples", "basic.mjs")], project),
+    await readFile(join(installed, "examples", "basic.output.txt"), "utf8"),
   );
-  assert.match(example.bundle_digest, /^sha256:[a-f0-9]{64}$/u);
-  assert.match(example.release_id, /^sha256:[a-f0-9]{64}$/u);
-  assert.equal(example.objects, 1);
 
   await writeFile(
     join(project, "consumer.mts"),
