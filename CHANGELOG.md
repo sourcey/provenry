@@ -1,12 +1,17 @@
 # Changelog
 
-## Unreleased
+## 0.1.1 - 2026-09-30
 
 ### Added
 
 - `examples/basic.output.txt`, the exact output of `examples/basic.mjs`.
   Verifying the package compares the installed example's output with it byte
   for byte.
+
+### Changed
+
+- The README installs with `npm install provenry`; zod arrives as its
+  dependency.
 
 ## 0.1.0 - 2026-09-29
 
