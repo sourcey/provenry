@@ -21,12 +21,17 @@ public provenance claim is made.
    registry tarball, installed exports, repository link and provenance after
    publication. A tag or package version must never be moved to different bytes.
 
-For later versions, configure an npm trusted publisher bound to this GitHub
-repository and a dedicated GitHub-hosted release workflow. npm's trusted
-publisher uses OIDC and generates provenance for public packages from public
-repositories. The first publication may need interactive npm account setup;
-do not treat a local tarball or private source commit as public provenance.
-See [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/).
+Pushing a `vX.Y.Z` tag runs `.github/workflows/release.yml`: it checks the
+tag against `package.json`, runs `npm run verify`, packs once, publishes those
+exact bytes if the version is absent, compares the registry contents with
+them, and attaches the registry tarball and its SHA-256 to the GitHub release.
+It publishes through npm's trusted publisher over OIDC, which also generates
+provenance, so it holds no npm token. The trusted publisher is configured once
+by a package owner with account 2FA:
+`npm trust github provenry --repo sourcey/provenry --file release.yml --allow-publish`.
+Until it exists the publish step fails and nothing is published; do not treat
+a local tarball or private source commit as public provenance. See
+[npm trusted publishing](https://docs.npmjs.com/trusted-publishers/).
 
 Consumer pin changes and production deployment are separate releases. They
 must use the exact published package and verify the installed historical

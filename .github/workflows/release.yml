@@ -1,0 +1,89 @@
+name: release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Existing release tag version without the v prefix
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  id-token: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    env:
+      RELEASE_TAG: ${{ inputs.version && format('v{0}', inputs.version) || github.ref_name }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ inputs.version && format('refs/tags/v{0}', inputs.version) || github.ref }}
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+          cache: npm
+      - name: Verify release identity
+        run: |
+          node -e '
+            const manifest = require("./package.json");
+            if (process.env.RELEASE_TAG !== `v${manifest.version}`) {
+              throw new Error(`${process.env.RELEASE_TAG} does not match ${manifest.version}`);
+            }
+          '
+      - run: npm ci --ignore-scripts
+      - run: npm run verify
+      - name: Pack once
+        run: |
+          mkdir -p release
+          npm pack --json --ignore-scripts --pack-destination release > release/pack.json
+          node -e '
+            const fs = require("fs");
+            const record = JSON.parse(fs.readFileSync("release/pack.json", "utf8"))[0];
+            fs.renameSync(`release/${record.filename}`, "release/provenry.tgz");
+          '
+          sha256sum release/provenry.tgz
+      # npm's trusted publisher for sourcey/provenry and this workflow file
+      # authenticates the publish over OIDC and attaches provenance; no token.
+      - name: Publish exact npm bytes if absent
+        run: |
+          version="${RELEASE_TAG#v}"
+          if npm view "provenry@$version" version >/dev/null 2>&1; then
+            echo "provenry@$version already exists"
+          else
+            npm publish ./release/provenry.tgz --access public --tag latest
+          fi
+      - name: Verify npm registry contents
+        run: |
+          version="${RELEASE_TAG#v}"
+          mkdir -p registry assets
+          # The registry can take minutes to serve a freshly published version.
+          for attempt in $(seq 1 40); do
+            if npm pack "provenry@$version" --prefer-online --pack-destination registry >/dev/null 2>&1; then break; fi
+            sleep 15
+          done
+          registry_tar="registry/provenry-$version.tgz"
+          test -f "$registry_tar"
+          # Compare package contents: gzip bytes vary with the zlib of the Node that packed them.
+          test "$(gunzip -c release/provenry.tgz | sha256sum | cut -d' ' -f1)" = "$(gunzip -c "$registry_tar" | sha256sum | cut -d' ' -f1)"
+          cp "$registry_tar" "assets/provenry-$version.tgz"
+          (cd assets && sha256sum "provenry-$version.tgz" > "provenry-$version.tgz.sha256")
+      - name: Publish registry bytes to the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${RELEASE_TAG#v}"
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" assets/* --clobber
+          else
+            gh release create "$RELEASE_TAG" assets/* --title "$RELEASE_TAG" --generate-notes --verify-tag
+          fi
