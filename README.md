@@ -54,6 +54,7 @@ parent, the bundle and the verifier that bind it, for example
 | --- | --- |
 | `primitives` | Canonical JSON, SHA-256 digests, canonical string order, identifiers |
 | `identity` | Subject identity transitions: merges, splits, successions and retirements |
+| `git` | Exact Git input: a clean checkout at a named commit, merge bases, and blobs read in bounded batches and checked against their object IDs |
 | `records/references` | Typed references between records, bound to an exact revision |
 | `capture/methods`, `capture/start`, `capture/attempts` | Installed capture methods, the reservation made before any physical capture, and the sealed result |
 | `capture/attestation` | Signed attestations of capture attempts, verified against a historical signer registry |

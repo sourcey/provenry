@@ -47,6 +47,10 @@
       "types": "./dist/modules/identity/src/index.d.ts",
       "import": "./dist/modules/identity/src/index.js"
     },
+    "./git": {
+      "types": "./dist/modules/git/src/index.d.ts",
+      "import": "./dist/modules/git/src/index.js"
+    },
     "./records/references": {
       "types": "./dist/modules/records/src/references.d.ts",
       "import": "./dist/modules/records/src/references.js"
