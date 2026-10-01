@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.2 - 2026-10-01
+
+### Added
+
+- `provenry/git`: exact Git input. A clean checkout at a named commit, merge
+  bases, and blobs read in bounded batches, each checked against its object ID.
+
 ## 0.1.1 - 2026-09-30
 
 ### Added
