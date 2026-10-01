@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.3 - 2026-10-01
+
+### Changed
+
+- zod is a `^4.6.5` dependency, so an application on the same or a later zod 4
+  shares one copy with Provenry instead of installing a second.
+
 ## 0.1.2 - 2026-10-01
 
 ### Added
