@@ -19,8 +19,11 @@ try {
   assert.ok(packed?.filename, "npm pack must produce one artifact");
   const artifact = join(workspace, packed.filename);
   await access(artifact);
-  // Install the packed bytes from a separate project. Registry resolution is
+  // The consumer takes the exact zod, TypeScript and Node types this repository
+  // builds with, so it can never drift from them. Registry resolution is
   // necessary on a fresh CI runner; npm ci does not populate every packument.
+  const lock = JSON.parse(await readFile(join(root, "package-lock.json"), "utf8"));
+  const locked = (name) => `${name}@${lock.packages[`node_modules/${name}`].version}`;
   run(
     "npm",
     [
@@ -31,9 +34,9 @@ try {
       "--prefix",
       project,
       artifact,
-      "zod@4.4.3",
-      "typescript@6.0.3",
-      "@types/node@24.10.1",
+      locked("zod"),
+      locked("typescript"),
+      locked("@types/node"),
     ],
     root,
   );
