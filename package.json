@@ -1,6 +1,6 @@
 {
   "name": "provenry",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "The facts and provenance engine behind Sourcey. Gives published facts a history anyone can verify from the files alone.",
   "license": "MIT",
   "repository": {
@@ -98,6 +98,10 @@
     "./publication/projection-snapshot": {
       "types": "./dist/modules/publication/src/projection-snapshot.d.ts",
       "import": "./dist/modules/publication/src/projection-snapshot.js"
+    },
+    "./publication/dataset-features": {
+      "types": "./dist/modules/publication/src/dataset-features.d.ts",
+      "import": "./dist/modules/publication/src/dataset-features.js"
     },
     "./contracts/publication": {
       "types": "./dist/contracts/publication/src/index.d.ts",
