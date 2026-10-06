@@ -5,10 +5,10 @@
 ### Added
 
 - `provenry/exchange/records`: sealed records of machine exchanges (any
-  HTTP method), carrying request header names, a credential only as the
-  digest of its custody handle and its scheme, body digests, a bounded
-  selection of response headers that never includes a cookie, timing, and
-  transport failures in the capture vocabulary.
+  HTTP method), carrying request header names, each credential only as the
+  digest of its custody handle, its scheme and the header or form field that
+  carried it, body digests, a bounded selection of response headers that never
+  includes a cookie, timing, and transport failures in the capture vocabulary.
 
 ## 0.1.3 - 2026-10-01
 

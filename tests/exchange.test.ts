@@ -26,11 +26,13 @@ const responded = {
     method: "POST" as const,
     url: "https://api.example.com/v1/messages",
     header_names: ["accept", "authorization", "content-type"],
-    credential: {
-      handle_digest: digest({ handle: "cred_01" }),
-      scheme: "bearer" as const,
-      header_name: "authorization",
-    },
+    credentials: [
+      {
+        handle_digest: digest({ handle: "cred_01" }),
+        scheme: "bearer" as const,
+        header_name: "authorization",
+      },
+    ],
     body: body('{"to":"sink@example.com"}'),
   },
   response: {
@@ -56,10 +58,10 @@ test("an exchange seals its physical facts and verifies byte for byte", () => {
 });
 
 test("an exchange never carries a secret or a cookie", () => {
-  assert.equal(
-    "value" in (sealExchangeRecord(responded).request.credential as object),
-    false,
-    "a credential is a handle digest and a scheme only",
+  assert.deepEqual(
+    Object.keys(sealExchangeRecord(responded).request.credentials[0] as object).sort(),
+    ["handle_digest", "header_name", "scheme"],
+    "a credential is a handle digest, a scheme and its carrier only",
   );
   assert.throws(
     () =>
@@ -86,7 +88,7 @@ test("an exchange never carries a secret or a cookie", () => {
   );
 });
 
-test("an exchange binds its credential to a header it sent", () => {
+test("an exchange binds each credential to the header or form body that carried it", () => {
   assert.throws(
     () =>
       sealExchangeRecord({
@@ -94,6 +96,56 @@ test("an exchange binds its credential to a header it sent", () => {
         request: { ...responded.request, header_names: ["accept", "content-type"] },
       }),
     /names a header the request sent/u,
+  );
+  const clientSecret = {
+    handle_digest: digest({ handle: "client" }),
+    scheme: "form" as const,
+    field: "client_secret",
+  };
+  const refresh = {
+    ...responded,
+    request: {
+      ...responded.request,
+      url: "https://auth.example.com/oauth/token",
+      header_names: ["accept", "content-type"],
+      credentials: [
+        clientSecret,
+        {
+          handle_digest: digest({ handle: "refresh" }),
+          scheme: "form" as const,
+          field: "refresh_token",
+        },
+      ],
+      body: body("grant_type=refresh_token", "application/x-www-form-urlencoded"),
+    },
+  };
+  assert.deepEqual(verifyExchangeRecord(sealExchangeRecord(refresh)), sealExchangeRecord(refresh));
+  assert.throws(
+    () =>
+      sealExchangeRecord({
+        ...refresh,
+        request: { ...refresh.request, body: body("{}") },
+      }),
+    /travels in a form body/u,
+  );
+  assert.throws(
+    () =>
+      sealExchangeRecord({
+        ...refresh,
+        request: { ...refresh.request, credentials: [...refresh.request.credentials].reverse() },
+      }),
+    /one per header or field/u,
+  );
+  assert.throws(
+    () =>
+      sealExchangeRecord({
+        ...refresh,
+        request: {
+          ...refresh.request,
+          credentials: [clientSecret, clientSecret],
+        },
+      }),
+    /one per header or field/u,
   );
 });
 

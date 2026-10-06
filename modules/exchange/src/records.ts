@@ -4,15 +4,22 @@ import { compareInstants, DIGEST_PATTERN, digest } from "../../primitives/src/in
 /**
  * One machine exchange as a verifier sees it: the request a service received,
  * the response it gave, and when. A record never holds a secret: request
- * header values are not recorded at all, and a credential appears only as the
- * digest of the custody handle that supplied it and the scheme it used.
- * Response headers are an explicit, bounded selection, never a cookie.
+ * header values are not recorded at all, and each credential appears only as
+ * the digest of the custody handle that supplied it, its scheme and where it
+ * travelled (a header, or a field of a form body). Response headers are an
+ * explicit, bounded selection, never a cookie.
  */
 
 const httpsUrl = z.url({ protocol: /^https$/u });
 const instant = z.iso.datetime({ offset: true });
 const digestSchema = z.string().regex(DIGEST_PATTERN);
 const headerName = z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u);
+const formField = z.string().regex(/^[A-Za-z0-9_.-]{1,64}$/u);
+
+/** The only body a form credential travels in. */
+export const FORM_MEDIA_TYPE = "application/x-www-form-urlencoded";
+/** The most credentials one exchange carries (a client secret and a refresh token, say). */
+export const MAXIMUM_EXCHANGE_CREDENTIALS = 4;
 
 export const EXCHANGE_METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"] as const;
 export type ExchangeMethod = (typeof EXCHANGE_METHODS)[number];
@@ -39,15 +46,28 @@ const body = z
   })
   .strict();
 
-const credential = z
-  .object({
-    /** The digest of the custody handle id; the handle itself and its secret stay in custody. */
-    handle_digest: digestSchema,
-    scheme: z.enum(["bearer", "basic", "header"]),
-    /** The request header that carried it. */
-    header_name: headerName,
-  })
-  .strict();
+/**
+ * One credential a request carried: the digest of its custody handle id (the
+ * handle and its secret stay in custody), its scheme, and the header or form
+ * field that carried it.
+ */
+const credential = z.union([
+  z
+    .object({
+      handle_digest: digestSchema,
+      scheme: z.enum(["bearer", "basic", "header"]),
+      header_name: headerName,
+    })
+    .strict(),
+  z
+    .object({
+      handle_digest: digestSchema,
+      scheme: z.literal("form"),
+      field: formField,
+    })
+    .strict(),
+]);
+export type ExchangeCredentialUse = z.infer<typeof credential>;
 
 const request = z
   .object({
@@ -55,7 +75,8 @@ const request = z
     url: httpsUrl,
     /** Names of the headers sent, sorted and unique; their values are never recorded. */
     header_names: z.array(headerName).max(64),
-    credential: credential.nullable(),
+    /** Sorted by where each travelled; one credential per header or field. */
+    credentials: z.array(credential).max(MAXIMUM_EXCHANGE_CREDENTIALS),
     body: body.nullable(),
   })
   .strict();
@@ -128,13 +149,29 @@ export const exchangeRecordCoreSchema = z
         message: "Request header names are sorted and unique.",
       });
     }
-    const carrier = record.request.credential?.header_name;
-    if (carrier !== undefined && !names.includes(carrier)) {
+    const carriers = record.request.credentials.map(credentialCarrier);
+    if (!isSortedUnique(carriers)) {
       context.addIssue({
         code: "custom",
-        path: ["request", "credential", "header_name"],
-        message: "A credential names a header the request sent.",
+        path: ["request", "credentials"],
+        message: "Credentials are sorted by where they travelled, one per header or field.",
       });
+    }
+    for (const [index, used] of record.request.credentials.entries()) {
+      if ("header_name" in used && !names.includes(used.header_name)) {
+        context.addIssue({
+          code: "custom",
+          path: ["request", "credentials", index, "header_name"],
+          message: "A credential names a header the request sent.",
+        });
+      }
+      if ("field" in used && record.request.body?.media_type !== FORM_MEDIA_TYPE) {
+        context.addIssue({
+          code: "custom",
+          path: ["request", "credentials", index, "field"],
+          message: "A form credential travels in a form body the request sent.",
+        });
+      }
     }
     const bodyless = record.request.method === "GET" || record.request.method === "HEAD";
     if (bodyless && record.request.body !== null) {
@@ -215,6 +252,13 @@ export function recordableResponseHeaders(
     throw new Error(`An exchange records at most ${MAXIMUM_RECORDED_HEADERS} response headers.`);
   }
   return sorted;
+}
+
+/** Where one credential travelled, in the order a record lists them. */
+export function credentialCarrier(
+  used: ExchangeCredentialUse,
+): `header:${string}` | `form:${string}` {
+  return "field" in used ? `form:${used.field}` : `header:${used.header_name}`;
 }
 
 function isSortedUnique(values: readonly string[]): boolean {
