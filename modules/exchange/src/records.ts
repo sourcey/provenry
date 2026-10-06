@@ -13,7 +13,9 @@ import { compareInstants, DIGEST_PATTERN, digest } from "../../primitives/src/in
 const httpsUrl = z.url({ protocol: /^https$/u });
 const instant = z.iso.datetime({ offset: true });
 const digestSchema = z.string().regex(DIGEST_PATTERN);
-const headerName = z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u);
+/** An HTTP field name as RFC 9110 defines it (a token), lower-cased as records keep it. */
+export const HEADER_NAME_PATTERN = /^[a-z0-9!#$%&'*+.^_`|~-]{1,128}$/u;
+const headerName = z.string().regex(HEADER_NAME_PATTERN);
 const formField = z.string().regex(/^[A-Za-z0-9_.-]{1,64}$/u);
 
 /** The only body a form credential travels in. */

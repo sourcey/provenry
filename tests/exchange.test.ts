@@ -150,6 +150,20 @@ test("an exchange binds each credential to the header or form body that carried 
 });
 
 test("request header names and response headers are canonical", () => {
+  const mirrored = sealExchangeRecord({
+    ...responded,
+    request: {
+      ...responded.request,
+      header_names: ["accept", "authorization", "content-type", "mcp-param-project_id"],
+    },
+  });
+  assert.equal(mirrored.request.header_names.at(-1), "mcp-param-project_id");
+  assert.throws(() =>
+    sealExchangeRecord({
+      ...responded,
+      request: { ...responded.request, header_names: ["accept", "authorization", "Content-Type"] },
+    }),
+  );
   assert.throws(
     () =>
       sealExchangeRecord({
