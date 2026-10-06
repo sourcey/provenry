@@ -58,6 +58,7 @@ parent, the bundle and the verifier that bind it, for example
 | `records/references` | Typed references between records, bound to an exact revision |
 | `capture/methods`, `capture/start`, `capture/attempts` | Installed capture methods, the reservation made before any physical capture, and the sealed result |
 | `capture/attestation` | Signed attestations of capture attempts, verified against a historical signer registry |
+| `exchange/records` | One machine exchange sealed for verification: the request a service received (header names only, a credential as its custody handle's digest), the response it gave and when; never a secret or a cookie |
 | `contracts/publication` | Envelope schemas, change vocabulary and the ownership registry of an instance |
 | `publication/envelope` | Sealing and verifying a release: object manifest, change log, diff, descriptor and bundle |
 | `publication/changes`, `publication/objects`, `publication/delivery`, `publication/preparation` | Change ordering, release files on disk, content-addressed delivery, and build-then-verify over installed code |

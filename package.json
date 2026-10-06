@@ -71,6 +71,10 @@
       "types": "./dist/modules/capture/src/start.d.ts",
       "import": "./dist/modules/capture/src/start.js"
     },
+    "./exchange/records": {
+      "types": "./dist/modules/exchange/src/records.d.ts",
+      "import": "./dist/modules/exchange/src/records.js"
+    },
     "./publication/changes": {
       "types": "./dist/modules/publication/src/changes.d.ts",
       "import": "./dist/modules/publication/src/changes.js"
