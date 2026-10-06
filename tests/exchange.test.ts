@@ -180,6 +180,14 @@ test("request header names and response headers are canonical", () => {
   assert.throws(() => recordableResponseHeaders(many), /at most/u);
 });
 
+test("a status outside the defined classes is still the response a service gave", () => {
+  const refused = sealExchangeRecord({
+    ...responded,
+    response: { ...responded.response, status: 999, body: body("", "text/html") },
+  });
+  assert.equal(refused.outcome === "responded" && refused.response.status, 999);
+});
+
 test("GET carries no body and an exchange cannot finish before it starts", () => {
   assert.throws(
     () =>

@@ -40,7 +40,7 @@ export const MAXIMUM_RECORDED_HEADER_VALUE = 1_024;
 
 const body = z
   .object({
-    media_type: z.string().min(1).max(255),
+    media_type: z.string().min(1).max(MAXIMUM_RECORDED_HEADER_VALUE),
     content_digest: digestSchema,
     content_bytes: z.number().int().nonnegative(),
   })
@@ -85,7 +85,8 @@ const responseHeader = z.tuple([headerName, z.string().min(1).max(MAXIMUM_RECORD
 
 const response = z
   .object({
-    status: z.number().int().min(100).max(599),
+    /** Any three-digit status a service sent, including ones outside the defined classes. */
+    status: z.number().int().min(100).max(999),
     /** Selected headers, sorted by name then value. */
     headers: z.array(responseHeader).max(MAXIMUM_RECORDED_HEADERS),
     body: body,
