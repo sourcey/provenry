@@ -5,6 +5,7 @@ import {
   compareCanonicalStrings,
   compareInstants,
   digest,
+  ipAddressVersion,
   MAX_CANONICAL_JSON_DEPTH,
   sha256Bytes,
 } from "../modules/primitives/src/index.js";
@@ -95,4 +96,12 @@ test("canonical string order compares NFC forms by code unit", () => {
   assert.equal(compareCanonicalStrings("Z", "a"), -1);
   assert.equal(compareCanonicalStrings("ö", "z"), 1);
   assert.deepEqual(["b", "ö", "a", "Z"].sort(compareCanonicalStrings), ["Z", "a", "b", "ö"]);
+});
+
+test("an IP address literal names its version; anything else is not one", () => {
+  assert.equal(ipAddressVersion("203.0.113.7"), 4);
+  assert.equal(ipAddressVersion("2001:db8::1"), 6);
+  for (const value of ["example.com", "203.0.113.256", "203.0.113.7 ", "", "[2001:db8::1]"]) {
+    assert.equal(ipAddressVersion(value), 0);
+  }
 });
