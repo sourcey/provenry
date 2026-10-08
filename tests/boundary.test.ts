@@ -80,3 +80,24 @@ test("engine source and tests name no product, product domain or consumer", asyn
   }
   assert.deepEqual(violations, []);
 });
+
+test("no file names the private hosted platform", async () => {
+  // The platform's name, encoded so that this public file does not spell it either.
+  const name = new RegExp(Buffer.from("YWxtYW5hYw==", "base64").toString("utf8"), "iu");
+  const skipped = new Set([".git", "node_modules", "dist"]);
+  const violations: string[] = [];
+  const visit = async (directory: string): Promise<void> => {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) {
+        if (!skipped.has(entry.name)) await visit(path);
+      } else if (entry.isFile()) {
+        if (name.test(entry.name) || name.test(await readFile(path, "latin1"))) {
+          violations.push(relative(root, path));
+        }
+      }
+    }
+  };
+  await visit(root);
+  assert.deepEqual(violations, []);
+});
