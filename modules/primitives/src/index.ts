@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { isIP } from "node:net";
 import { canonicalJson, normalizeCanonicalString } from "./canonical.js";
 
 export { canonicalJson, MAX_CANONICAL_JSON_DEPTH } from "./canonical.js";
@@ -100,6 +101,11 @@ export function deriveOperationId(operationContract: string, value: unknown): Op
     remaining >>= 5n;
   }
   return `op_${encoded}`;
+}
+
+/** The version of an IP address literal: 4, 6, or 0 when the value is not one. */
+export function ipAddressVersion(value: string): 0 | 4 | 6 {
+  return isIP(value) as 0 | 4 | 6;
 }
 
 export function prettyJson(value: unknown): string {

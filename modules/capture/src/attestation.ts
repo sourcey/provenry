@@ -1,4 +1,3 @@
-import { createPublicKey, verify } from "node:crypto";
 import { z } from "zod";
 import {
   canonicalJson,
@@ -8,6 +7,12 @@ import {
   IDENTIFIER_PATTERN,
   sha256Bytes,
 } from "../../primitives/src/index.js";
+import {
+  type ReceiptKeys,
+  receiptKey,
+  receiptPreimage,
+  receiptSignatureValid,
+} from "../../receipts/src/index.js";
 import type { CaptureAttempt } from "./attempts.js";
 import type { CaptureMethodRegistryDirectory } from "./methods.js";
 import { type CaptureAttemptStart, verifyCaptureAttemptSettlement } from "./start.js";
@@ -89,6 +94,36 @@ export interface CaptureAttemptAttestationTrust {
   }): Promise<string> | string;
 }
 
+/**
+ * The trust a registry's keys give attestations: the named key, of the named
+ * issuer, may sign capture attempts at the signed time and is not compromised
+ * at `sequence`. Only attestations naming `registryDigest` are answered. A
+ * signer resolves the one active key itself (`activeReceiptKey`).
+ */
+export function captureAttemptReceiptTrust(
+  keys: ReceiptKeys,
+  options: { readonly registryDigest: string; readonly sequence?: number },
+): CaptureAttemptAttestationTrust {
+  if (!DIGEST_PATTERN.test(options.registryDigest)) {
+    throw new Error("Capture attempt trust names its signer registry by digest.");
+  }
+  return {
+    resolveCaptureAttemptPublicKey(input) {
+      if (input.signerRegistryDigest !== options.registryDigest) {
+        throw new Error("Capture attempt attestation names another signer registry.");
+      }
+      return receiptKey(keys, {
+        subject: "Capture attempt attestation",
+        keyId: input.keyId,
+        issuerId: input.issuerId,
+        purpose: CAPTURE_ATTEMPT_SIGNATURE_PURPOSE,
+        at: input.signedAt,
+        ...(options.sequence === undefined ? {} : { sequence: options.sequence }),
+      }).publicKeyPem;
+    },
+  };
+}
+
 /** The attestation core of one settled attempt, signed no earlier than its result. */
 export function captureAttemptAttestationCore(input: {
   readonly registries: CaptureMethodRegistryDirectory;
@@ -167,17 +202,81 @@ export async function verifyCaptureAttemptAttestation(input: {
   return attestation;
 }
 
+/** One attested capture: the start, the attempt it settled and the attestation that proves them. */
+export interface AttestedCapture {
+  readonly start: CaptureAttemptStart;
+  readonly attempt: CaptureAttempt;
+  readonly attestation: CaptureAttemptAttestation;
+}
+
+/**
+ * The captures a published set of records proves, keyed by attestation digest,
+ * the identity a citation names. Each attestation's start and attempt must be
+ * in the set and verify together; every start and attempt must be proved by
+ * an attestation; a start settles one attempt. `trustFor` gives the trust that
+ * judges each attestation, so a publisher may judge each one at the point it
+ * was first published. Whether one attempt may carry several attestations is
+ * the publisher's rule: several starts can settle to one physical result.
+ */
+export async function verifyAttestedCaptures(input: {
+  readonly registries: CaptureMethodRegistryDirectory;
+  readonly starts: readonly CaptureAttemptStart[];
+  readonly attempts: readonly CaptureAttempt[];
+  readonly attestations: readonly CaptureAttemptAttestation[];
+  readonly trustFor: (attestation: CaptureAttemptAttestation) => CaptureAttemptAttestationTrust;
+}): Promise<ReadonlyMap<string, AttestedCapture>> {
+  const byDigest = <T>(values: readonly T[], key: (value: T) => string, label: string) => {
+    const map = new Map<string, T>();
+    for (const value of values) {
+      if (map.has(key(value))) throw new Error(`A published capture ${label} appears twice.`);
+      map.set(key(value), value);
+    }
+    return map;
+  };
+  const starts = byDigest(input.starts, (start) => start.start_digest, "start");
+  const attempts = byDigest(input.attempts, (attempt) => attempt.attempt_digest, "attempt");
+  const usedStarts = new Map<string, string>();
+  const usedAttempts = new Set<string>();
+  const proved = new Map<string, AttestedCapture>();
+  for (const value of input.attestations) {
+    const attestation = captureAttemptAttestationSchema.parse(value);
+    if (proved.has(attestation.attestation_digest)) {
+      throw new Error("A published capture attestation appears twice.");
+    }
+    const start = starts.get(attestation.start_digest);
+    const attempt = attempts.get(attestation.attempt_digest);
+    if (!start || !attempt) {
+      throw new Error("A published capture attestation lacks its start or its attempt.");
+    }
+    const settled = usedStarts.get(start.start_digest);
+    if (settled !== undefined && settled !== attempt.attempt_digest) {
+      throw new Error("A published capture start settles more than one attempt.");
+    }
+    await verifyCaptureAttemptAttestation({
+      registries: input.registries,
+      start,
+      result: attempt,
+      attestation,
+      trust: input.trustFor(attestation),
+    });
+    usedStarts.set(start.start_digest, attempt.attempt_digest);
+    usedAttempts.add(attempt.attempt_digest);
+    proved.set(attestation.attestation_digest, { start, attempt, attestation });
+  }
+  if (usedStarts.size !== starts.size || usedAttempts.size !== attempts.size) {
+    throw new Error("A published capture start or attempt is proved by no attestation.");
+  }
+  return proved;
+}
+
 function signaturePreimage(
   attestationDigest: string,
   header: CaptureAttemptSignatureHeader,
 ): Buffer {
-  return Buffer.from(
-    `${SIGNATURE_DOMAIN}\0${canonicalJson({
-      attestation_digest: attestationDigest,
-      protected: captureAttemptSignatureHeaderSchema.parse(header),
-    })}`,
-    "utf8",
-  );
+  return receiptPreimage([SIGNATURE_DOMAIN], {
+    attestation_digest: attestationDigest,
+    protected: captureAttemptSignatureHeaderSchema.parse(header),
+  });
 }
 
 /** The signature must come from a key the historical registry authorized for this purpose. */
@@ -192,16 +291,11 @@ async function assertAttestationSignature(
     signerRegistryDigest: header.signer_registry_digest,
     signedAt: attestation.signed_at,
   });
-  const publicKey = createPublicKey(publicKeyPem);
-  if (publicKey.asymmetricKeyType !== "ed25519") {
-    throw new Error("Capture attempt attestation requires an Ed25519 public key.");
-  }
   if (
-    !verify(
-      null,
+    !receiptSignatureValid(
+      publicKeyPem,
       signaturePreimage(attestation.attestation_digest, header),
-      publicKey,
-      Buffer.from(signature, "base64"),
+      signature,
     )
   ) {
     throw new Error("Capture attempt attestation signature is invalid.");

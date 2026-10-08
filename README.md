@@ -56,8 +56,11 @@ parent, the bundle and the verifier that bind it, for example
 | `identity` | Subject identity transitions: merges, splits, successions and retirements |
 | `git` | Exact Git input: a clean checkout at a named commit, merge bases, and blobs read in bounded batches and checked against their object IDs |
 | `records/references` | Typed references between records, bound to an exact revision |
+| `receipts` | Who may sign what, checked one way for every signed object: keys authorized for purposes inside a validity interval and until a compromise sequence, the one active key a signer uses, Ed25519 over domain-separated bytes, and root-key thresholds. Each registry format adapts its keys onto it unchanged |
 | `capture/methods`, `capture/start`, `capture/attempts` | Installed capture methods, the reservation made before any physical capture, and the sealed result |
-| `capture/attestation` | Signed attestations of capture attempts, verified against a historical signer registry |
+| `capture/attestation` | Signed attestations of capture attempts, verified against a historical signer registry; `captureAttemptReceiptTrust` is that trust over a registry's keys, and `verifyAttestedCaptures` proves a published set of them |
+| `capture/normalize`, `capture/html` | Captured bytes to the normalized text evidence grounds in, re-run by a verifier to check a normalized digest offline: HTML as named sections, text with its lines trimmed, JSON canonicalized, under the profile a product retains; `capture/html` is its memory-bounded parse5 reader, the one module that names parse5 |
+| `exchange/records` | One machine exchange sealed for verification: the request a service received (header names only, each credential as its custody handle's digest and the header or form field that carried it), the response it gave and when; never a secret or a cookie |
 | `contracts/publication` | Envelope schemas, change vocabulary and the ownership registry of an instance |
 | `publication/envelope` | Sealing and verifying a release: object manifest, change log, diff, descriptor and bundle |
 | `publication/changes`, `publication/objects`, `publication/delivery`, `publication/preparation` | Change ordering, release files on disk, content-addressed delivery, and build-then-verify over installed code |
