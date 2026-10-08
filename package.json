@@ -1,6 +1,6 @@
 {
   "name": "provenry",
-  "version": "0.1.5",
+  "version": "0.2.0",
   "description": "The facts and provenance engine behind Sourcey. Gives published facts a history anyone can verify from the files alone.",
   "license": "MIT",
   "repository": {
@@ -55,6 +55,10 @@
       "types": "./dist/modules/records/src/references.d.ts",
       "import": "./dist/modules/records/src/references.js"
     },
+    "./receipts": {
+      "types": "./dist/modules/receipts/src/index.d.ts",
+      "import": "./dist/modules/receipts/src/index.js"
+    },
     "./capture/attempts": {
       "types": "./dist/modules/capture/src/attempts.d.ts",
       "import": "./dist/modules/capture/src/attempts.js"
@@ -70,6 +74,14 @@
     "./capture/start": {
       "types": "./dist/modules/capture/src/start.d.ts",
       "import": "./dist/modules/capture/src/start.js"
+    },
+    "./capture/html": {
+      "types": "./dist/modules/capture/src/html.d.ts",
+      "import": "./dist/modules/capture/src/html.js"
+    },
+    "./capture/normalize": {
+      "types": "./dist/modules/capture/src/normalize.d.ts",
+      "import": "./dist/modules/capture/src/normalize.js"
     },
     "./exchange/records": {
       "types": "./dist/modules/exchange/src/records.d.ts",
@@ -121,6 +133,7 @@
     "verify": "npm run typecheck && npm run lint && npm test && npm run build && node scripts/check-exports.mjs && node scripts/check-package.mjs"
   },
   "dependencies": {
+    "parse5": "8.0.1",
     "zod": "^4.6.5"
   },
   "devDependencies": {

@@ -29,12 +29,14 @@ const importSpecifiers = (text: string) =>
     specifier ? [specifier] : [],
   );
 
-test("engine source imports only Node built-ins, zod and engine files", async () => {
+test("engine source imports only Node built-ins, zod, the capture HTML parser and engine files", async () => {
   const violations: string[] = [];
   for (const file of await sourceFiles()) {
     const text = await readFile(file, "utf8");
     for (const specifier of importSpecifiers(text)) {
       if (specifier.startsWith("node:") || specifier === "zod") continue;
+      // The capture normalizer's HTML parser is the one file that names parse5.
+      if (specifier === "parse5" && file === join(root, "modules/capture/src/html.ts")) continue;
       const target = specifier.startsWith(".") ? resolve(dirname(file), specifier) : null;
       const inside =
         target !== null &&
