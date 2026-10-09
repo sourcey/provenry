@@ -1,5 +1,6 @@
 import type { z } from "zod";
 import {
+  assertDeclaredReleaseFiles,
   assertPublicationFilePaths,
   encodePublicationChanges,
   encodePublicationJson,
@@ -124,34 +125,34 @@ interface PublicationBundleFields {
   readonly files: Readonly<Record<string, { readonly sha256: string; readonly bytes: number }>>;
 }
 
+/**
+ * Prove one bundle file: its digest covers its core and its bytes are its one
+ * canonical rendering. The bundle cannot declare its own bytes, so that
+ * rendering is what closes the last file of a release.
+ */
+function verifyPublicationBundleFile<Bundle extends PublicationBundleFields>(
+  bundleSchema: z.ZodType<Bundle>,
+  releaseFiles: ReadonlyMap<string, Buffer>,
+): Bundle {
+  const bundle = verifyPublicationBundle(
+    bundleSchema,
+    parseJsonFile(releaseFiles, PUBLICATION_ENVELOPE_FILES.bundle, RELEASE),
+  );
+  assertRendering(releaseFiles, PUBLICATION_ENVELOPE_FILES.bundle, bundle);
+  return bundle;
+}
+
 /** Prove a release's byte closure: its bundle digest and exactly its declared files. */
 function verifyPublicationFiles<Bundle extends PublicationBundleFields>(
   bundleSchema: z.ZodType<Bundle>,
   releaseFiles: ReadonlyMap<string, Buffer>,
 ): { readonly bundle: Bundle; readonly files: ReadonlyMap<string, Buffer> } {
-  const bundle = verifyPublicationBundle(
-    bundleSchema,
-    parseJsonFile(releaseFiles, PUBLICATION_ENVELOPE_FILES.bundle, RELEASE),
-  );
-  // The bundle cannot declare its own bytes. Its canonical rendering is what
-  // closes that last file, including for transport-only verification.
-  assertRendering(releaseFiles, PUBLICATION_ENVELOPE_FILES.bundle, bundle);
-  // The release holds the bundle plus exactly the declared files: equal counts and
-  // every declaration present make the two sets equal.
+  const bundle = verifyPublicationBundleFile(bundleSchema, releaseFiles);
   const declared = Object.keys(bundle.files).sort(compareCanonicalStrings);
-  if (
-    releaseFiles.size !== declared.length + 1 ||
-    declared.includes(PUBLICATION_ENVELOPE_FILES.bundle)
-  ) {
-    throw new Error("Publication file set does not match its immutable declaration.");
-  }
-  assertPublicationFilePaths([...declared, PUBLICATION_ENVELOPE_FILES.bundle]);
+  assertDeclaredReleaseFiles(new Set(releaseFiles.keys()), declared);
   const files = new Map<string, Buffer>();
   for (const path of declared) {
-    const bytes = releaseFiles.get(path);
-    if (!bytes) {
-      throw new Error("Publication file set does not match its immutable declaration.");
-    }
+    const bytes = releaseFiles.get(path) as Buffer;
     const declaration = bundle.files[path];
     if (declaration?.bytes !== bytes.byteLength || declaration.sha256 !== sha256Bytes(bytes)) {
       throw new Error(`Publication file ${path} does not match its byte declaration.`);
@@ -355,6 +356,18 @@ export function createPublicationEnvelope<
      */
     verifyFiles(releaseFiles: ReadonlyMap<string, Buffer>) {
       return verifyPublicationFiles(schemas.bundle, releaseFiles);
+    },
+
+    /**
+     * The bundle file alone, for a release too large to hold: its digest and its
+     * canonical bytes. `verifyReleaseDirectory` then proves the stored files
+     * against its declarations one at a time, which together is `verifyFiles`.
+     */
+    verifyBundle(bundleBytes: Buffer) {
+      return verifyPublicationBundleFile(
+        schemas.bundle,
+        new Map([[PUBLICATION_ENVELOPE_FILES.bundle, bundleBytes]]),
+      );
     },
 
     /**

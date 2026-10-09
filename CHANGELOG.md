@@ -1,6 +1,25 @@
 # Changelog
 
-## Unreleased
+## 0.2.1 - 2026-10-09
+
+### Added
+
+- `verifyReleaseDirectory` (in `publication/objects`): proves a stored release
+  holds exactly the bytes its bundle declares, one file at a time. Memory holds
+  the declarations and one stream buffer per file in flight, never the release,
+  so a release of any size verifies. A link, a special file, a missing or extra
+  file, or any byte unlike its declaration is refused. `PublicationFileDeclaration`
+  is exported beside it.
+
+- `verifyBundle` on a publication envelope: the bundle file alone, its digest
+  and its one canonical rendering. With `verifyReleaseDirectory` it is
+  `verifyFiles` for a release too large to hold in memory.
+
+- `assertDeclaredReleaseFiles` (in `contracts/publication`): a release holds its
+  bundle plus exactly its declared files, at canonical paths. `verifyFiles` and
+  `verifyReleaseDirectory` share it.
+
+## 0.2.0 - 2026-10-08
 
 ### Added
 
@@ -49,6 +68,24 @@
 
 - `capture/attestation` verifies through `receipts`, so a trust port returns a
   canonical Ed25519 SPKI PEM.
+
+## 0.1.5 - 2026-10-04
+
+### Added
+
+- `provenry/publication/dataset-features`: `renderDatasetFeatures` describes a
+  JSONL row schema for a dataset card, without inferring across shards.
+
+## 0.1.4 - 2026-10-04
+
+### Added
+
+- `provenry/publication/projection-shards`: deterministic JSONL shards of a
+  derived projection, keyed by digest-prefix paths, and the update that splits
+  a leaf only where it grows. `provenry/publication/projection-snapshot`: a
+  confirmed snapshot of those shards (`provenry.projection-snapshot/v1`), closed
+  over its exact shard inventory, so a successor fetches only the shards it
+  touches.
 
 ## 0.1.3 - 2026-10-01
 

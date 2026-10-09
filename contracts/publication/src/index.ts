@@ -96,6 +96,24 @@ export function assertPublicationFilePaths(paths: Iterable<string>): void {
   }
 }
 
+/**
+ * A release holds its bundle plus exactly the files the bundle declares, at
+ * canonical paths: equal counts and every declaration present make the sets equal.
+ */
+export function assertDeclaredReleaseFiles(
+  present: ReadonlySet<string>,
+  declared: readonly string[],
+): void {
+  if (
+    present.size !== declared.length + 1 ||
+    !present.has(PUBLICATION_ENVELOPE_FILES.bundle) ||
+    declared.some((path) => path === PUBLICATION_ENVELOPE_FILES.bundle || !present.has(path))
+  ) {
+    throw new Error("Publication file set does not match its immutable declaration.");
+  }
+  assertPublicationFilePaths([...declared, PUBLICATION_ENVELOPE_FILES.bundle]);
+}
+
 export function isPublicationEnvelopePath(path: string): boolean {
   return envelopePaths.has(path);
 }

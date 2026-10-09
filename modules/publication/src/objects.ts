@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto";
-import { constants, createReadStream } from "node:fs";
+import { constants } from "node:fs";
 import {
   lstat,
   mkdir,
   mkdtemp,
+  open,
   readdir,
   readFile,
   realpath,
@@ -13,11 +14,14 @@ import {
 } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import {
+  assertDeclaredReleaseFiles,
   assertPublicationFilePaths,
   PUBLICATION_ENVELOPE_FILES,
 } from "../../../contracts/publication/src/index.js";
 import { compareCanonicalStrings, mapLimit, resolveInside } from "../../primitives/src/index.js";
 import { type PublicationFileDeclaration, sortedDeclarations } from "./declarations.js";
+
+export type { PublicationFileDeclaration } from "./declarations.js";
 
 /** Files read or written at once; enough to hide I/O latency without flooding descriptors. */
 const FILE_CONCURRENCY = 16;
@@ -122,28 +126,7 @@ export async function readReleaseFiles(
   ) {
     throw new TypeError("Publication read limits must be positive safe integers.");
   }
-  if (typeof constants.O_NOFOLLOW !== "number") {
-    throw new Error("Publication release reading requires filesystem no-follow support.");
-  }
-  const root = resolve(directory);
-  if ((await lstat(root)).isSymbolicLink()) {
-    throw new Error(`Publication release root is a symlink: ${directory}.`);
-  }
-  const paths: string[] = [];
-  const visit = async (relativeDirectory: string): Promise<void> => {
-    const entries = await readdir(join(root, relativeDirectory), { withFileTypes: true });
-    entries.sort((left, right) => compareCanonicalStrings(left.name, right.name));
-    for (const entry of entries) {
-      const path = relativeDirectory ? `${relativeDirectory}/${entry.name}` : entry.name;
-      if (entry.isDirectory()) await visit(path);
-      else if (entry.isFile()) {
-        paths.push(path);
-        if (paths.length > limits.maxFiles)
-          throw new Error("Publication release exceeds its file limit.");
-      } else throw new Error(`Publication release contains a non-regular file: ${path}.`);
-    }
-  };
-  await visit("");
+  const { root, paths } = await releasePaths(directory, limits.maxFiles);
   assertPublicationFilePaths(paths);
   let totalBytes = 0;
   const contents = await mapLimit(paths, FILE_CONCURRENCY, async (path) => {
@@ -155,18 +138,57 @@ export async function readReleaseFiles(
       throw new Error(`Publication release exceeds its byte limit at ${path}.`);
     }
     totalBytes += status.size;
-    // Release directories are immutable custody inputs. Preflight keeps a
-    // stable file within budget. No-follow refuses a substituted file symlink;
-    // nonblocking avoids hanging on a substituted FIFO.
-    const bytes = await readFile(filename, {
-      flag: constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
-    });
+    // Preflight keeps a stable file within budget.
+    const bytes = await readFile(filename, { flag: CUSTODY_READ });
     if (bytes.byteLength !== status.size) {
       throw new Error(`Publication release file changed while reading: ${path}.`);
     }
     return bytes;
   });
   return new Map(paths.map((path, index) => [path, contents[index] as Buffer]));
+}
+
+/**
+ * Prove a stored release holds exactly the bytes its bundle declares, one file
+ * at a time: memory holds the declarations and one stream buffer per file in
+ * flight, never the release, so a release of any size verifies. The caller has
+ * verified `bundleBytes` as its bundle (an envelope's `verifyBundle`) and passes
+ * that bundle's declarations.
+ */
+export async function verifyReleaseDirectory(
+  directory: string,
+  declared: {
+    readonly bundleBytes: Buffer;
+    readonly files: Readonly<Record<string, PublicationFileDeclaration>>;
+  },
+): Promise<void> {
+  const declaredPaths = Object.keys(declared.files);
+  // One more than the release may hold is enough to refuse an extra file.
+  const { root, paths } = await releasePaths(directory, declaredPaths.length + 1);
+  assertDeclaredReleaseFiles(new Set(paths), declaredPaths);
+  const bundle = join(root, PUBLICATION_ENVELOPE_FILES.bundle);
+  const bundleStatus = await lstat(bundle);
+  if (
+    !bundleStatus.isFile() ||
+    bundleStatus.size !== declared.bundleBytes.byteLength ||
+    !(await readFile(bundle, { flag: CUSTODY_READ })).equals(declared.bundleBytes)
+  ) {
+    throw new Error("Publication release bundle is not the verified bundle.");
+  }
+  await mapLimit(declaredPaths, FILE_CONCURRENCY, async (path) => {
+    const filename = join(root, path);
+    const declaration = declared.files[path] as PublicationFileDeclaration;
+    const status = await lstat(filename);
+    if (!status.isFile())
+      throw new Error(`Publication release contains a non-regular file: ${path}.`);
+    if (status.size !== declaration.bytes) {
+      throw new Error(`Publication file ${path} does not match its byte declaration.`);
+    }
+    const stored = await hashFile(filename, CUSTODY_READ);
+    if (stored.bytes !== declaration.bytes || stored.sha256 !== declaration.sha256) {
+      throw new Error(`Publication file ${path} does not match its byte declaration.`);
+    }
+  });
 }
 
 /** Declare the exact bytes of closed input trees, refusing any symlink on the way. */
@@ -189,19 +211,69 @@ export async function declareTree(
   const names = [...located.keys()];
   // Only the bounded stream buffers survive while hashing; the result retains
   // metadata, not every byte of the input trees.
-  const entries = await mapLimit(names, FILE_CONCURRENCY, async (name) => {
-    const hash = createHash("sha256");
-    let bytes = 0;
-    for await (const chunk of createReadStream(located.get(name) as string)) {
+  const entries = await mapLimit(
+    names,
+    FILE_CONCURRENCY,
+    async (name) => [name, await hashFile(located.get(name) as string)] as const,
+  );
+  return {
+    files: sortedDeclarations(entries),
+  };
+}
+
+/**
+ * Release directories are immutable custody inputs. No-follow refuses a
+ * substituted file symlink; nonblocking avoids hanging on a substituted FIFO.
+ */
+const CUSTODY_READ = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
+
+/** Every regular file of a release in canonical order, refusing links, special files and excess. */
+async function releasePaths(
+  directory: string,
+  maxFiles: number,
+): Promise<{ readonly root: string; readonly paths: readonly string[] }> {
+  if (typeof constants.O_NOFOLLOW !== "number") {
+    throw new Error("Publication release reading requires filesystem no-follow support.");
+  }
+  const root = resolve(directory);
+  if ((await lstat(root)).isSymbolicLink()) {
+    throw new Error(`Publication release root is a symlink: ${directory}.`);
+  }
+  const paths: string[] = [];
+  const visit = async (relativeDirectory: string): Promise<void> => {
+    const entries = await readdir(join(root, relativeDirectory), { withFileTypes: true });
+    entries.sort((left, right) => compareCanonicalStrings(left.name, right.name));
+    for (const entry of entries) {
+      const path = relativeDirectory ? `${relativeDirectory}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) await visit(path);
+      else if (entry.isFile()) {
+        paths.push(path);
+        if (paths.length > maxFiles) throw new Error("Publication release exceeds its file limit.");
+      } else throw new Error(`Publication release contains a non-regular file: ${path}.`);
+    }
+  };
+  await visit("");
+  return { root, paths };
+}
+
+/** One file's byte declaration, streamed: only the stream's buffer is held. */
+async function hashFile(
+  filename: string,
+  flags: number = constants.O_RDONLY,
+): Promise<PublicationFileDeclaration> {
+  const hash = createHash("sha256");
+  let bytes = 0;
+  const file = await open(filename, flags);
+  try {
+    for await (const chunk of file.createReadStream({ autoClose: false })) {
       const buffer = chunk as Buffer;
       hash.update(buffer);
       bytes += buffer.byteLength;
     }
-    return [name, { sha256: `sha256:${hash.digest("hex")}`, bytes }] as const;
-  });
-  return {
-    files: sortedDeclarations(entries),
-  };
+  } finally {
+    await file.close();
+  }
+  return { sha256: `sha256:${hash.digest("hex")}`, bytes };
 }
 
 async function filesUnder(path: string): Promise<string[]> {

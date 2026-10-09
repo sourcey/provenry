@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, symlink } from "node:fs/promises";
+import { mkdtemp, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -12,14 +12,18 @@ import {
   publicationEnvelopeSchemas,
   publicationOwnershipRegistry,
 } from "../contracts/publication/src/index.js";
-import { digest, sha256Bytes } from "../modules/primitives/src/index.js";
+import { canonicalJson, digest, sha256Bytes } from "../modules/primitives/src/index.js";
 import { sealPublicationChange } from "../modules/publication/src/changes.js";
 import {
   createPublicationEnvelope,
   type PublicationParent,
   publicationParent,
 } from "../modules/publication/src/envelope.js";
-import { readReleaseFiles, writeReleaseFiles } from "../modules/publication/src/objects.js";
+import {
+  readReleaseFiles,
+  verifyReleaseDirectory,
+  writeReleaseFiles,
+} from "../modules/publication/src/objects.js";
 
 // A neutral fixture domain. It exists only to prove that a composition other
 // than the first consumer publishes through engine APIs alone.
@@ -931,4 +935,65 @@ test("byte closure is a separate, weaker check than envelope verification", () =
   const missingBundle = new Map(release);
   missingBundle.delete(PUBLICATION_ENVELOPE_FILES.bundle);
   assert.throws(() => envelope.verifyFiles(missingBundle), /missing bundle\.json/u);
+});
+
+test("a stored release verifies one file at a time against its verified bundle alone", async () => {
+  const sealed = sealLedgerRelease(genesisInput);
+  const bundleBytes = Buffer.from(sealed.bundleBytes);
+  const bundle = envelope.verifyBundle(bundleBytes);
+  assert.equal(bundle.bundle_digest, sealed.bundle.bundle_digest);
+  assert.throws(
+    () => envelope.verifyBundle(Buffer.from(`${JSON.stringify(sealed.bundle, null, 2)}\n`)),
+    /bundle.json.*canonical rendering/u,
+  );
+  assert.throws(
+    () =>
+      envelope.verifyBundle(
+        Buffer.from(`${canonicalJson({ ...sealed.bundle, bundle_digest: notePolicyDigest })}\n`),
+      ),
+    /digest does not match/u,
+  );
+
+  const root = await mkdtemp(join(tmpdir(), "publication-directory-"));
+  const release = join(root, "release");
+  const declared = { bundleBytes, files: bundle.files };
+  const [path] = Object.keys(bundle.files).filter((name) => name.startsWith("notes/"));
+  assert.ok(path);
+  try {
+    await writeReleaseFiles(release, sealed);
+    await verifyReleaseDirectory(release, declared);
+
+    const stored = await readReleaseFiles(release);
+    const bytes = stored.get(path) as Buffer;
+    const altered = Buffer.from(bytes);
+    altered[0] = (altered[0] as number) ^ 1;
+    await writeFile(join(release, path), altered);
+    await assert.rejects(
+      verifyReleaseDirectory(release, declared),
+      /does not match its byte declaration/u,
+      "One flipped byte at the declared size is found by its digest.",
+    );
+    await writeFile(join(release, path), bytes);
+
+    await writeFile(join(release, "notes", "extra.json"), "{}");
+    await assert.rejects(verifyReleaseDirectory(release, declared), /file limit/u);
+    await unlink(join(release, "notes", "extra.json"));
+
+    await unlink(join(release, path));
+    await assert.rejects(verifyReleaseDirectory(release, declared), /immutable declaration/u);
+    await symlink(join(root, "elsewhere"), join(release, path));
+    await assert.rejects(verifyReleaseDirectory(release, declared), /non-regular file/u);
+    await unlink(join(release, path));
+    await writeFile(join(release, path), bytes);
+
+    await writeFile(
+      join(release, PUBLICATION_ENVELOPE_FILES.bundle),
+      `${JSON.stringify(sealed.bundle, null, 2)}\n`,
+    );
+    await assert.rejects(verifyReleaseDirectory(release, declared), /not the verified bundle/u);
+    await writeFile(join(release, PUBLICATION_ENVELOPE_FILES.bundle), bundleBytes);
+    await verifyReleaseDirectory(release, declared);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
