@@ -1,5 +1,14 @@
 import { IDENTIFIER_PATTERN } from "../../primitives/src/index.js";
 
+export {
+  evaluateIdentityConflicts,
+  type IdentityConflict,
+  type IdentityConflictCandidate,
+  type IdentityConflictKey,
+  type IdentityConflictMatch,
+  type IdentityConflictSource,
+} from "./conflicts.js";
+
 export type SubjectIdentityTransition =
   | {
       readonly kind: "merge";

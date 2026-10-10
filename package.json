@@ -1,6 +1,6 @@
 {
   "name": "provenry",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "The facts and provenance engine behind Sourcey. Gives published facts a history anyone can verify from the files alone.",
   "license": "MIT",
   "repository": {

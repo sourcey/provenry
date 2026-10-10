@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.2.2 - 2026-10-10
+
+### Added
+
+- `evaluateIdentityConflicts` (in `identity`): which claims on a candidate's
+  identity keys hold it back, the one rule every product and public verifier
+  applies. Keys are opaque digests the product derives; matches come from
+  published state, open pull requests, merged but unpublished lineage and
+  pending submissions. A candidate never conflicts with itself (its own pull
+  request at its head, its own submission's candidate, a pending submission
+  that is its own pull request, or its own subject under the same identity),
+  and the first open pull request holds an identity, so a later one never holds
+  back an earlier one. A match for a key not asked for, from another live
+  parent, or naming the candidate at another head or candidate is refused.
+  Conflicts come back grouped by key, with the match objects given, so each
+  product words them itself.
+
 ## 0.2.1 - 2026-10-09
 
 ### Added
