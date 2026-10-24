@@ -107,121 +107,148 @@ const timing = {
   finished_at: instant,
 };
 
+const responded = z
+  .object({
+    ...timing,
+    outcome: z.literal("responded"),
+    request,
+    response,
+  })
+  .strict();
+
+const failed = z
+  .object({
+    ...timing,
+    outcome: z.literal("transport_error"),
+    request,
+    reason: z.enum([
+      "dns_failure",
+      "deadline_exceeded",
+      "tls_failure",
+      "byte_limit",
+      "non_public_address",
+      "policy_blocked",
+      "other",
+    ]),
+  })
+  .strict();
+
+/** What every record of a physical exchange holds to, beyond its shape. */
+function checkExchange(
+  record: z.infer<typeof responded> | z.infer<typeof failed>,
+  context: z.RefinementCtx,
+): void {
+  if (compareInstants(record.started_at, record.finished_at) > 0) {
+    context.addIssue({
+      code: "custom",
+      path: ["finished_at"],
+      message: "An exchange cannot finish before it starts.",
+    });
+  }
+  const url = new URL(record.request.url);
+  if (url.username || url.password || url.hash) {
+    context.addIssue({
+      code: "custom",
+      path: ["request", "url"],
+      message: "An exchange URL carries no credentials or fragment.",
+    });
+  }
+  const names = record.request.header_names;
+  if (!isSortedUnique(names)) {
+    context.addIssue({
+      code: "custom",
+      path: ["request", "header_names"],
+      message: "Request header names are sorted and unique.",
+    });
+  }
+  const carriers = record.request.credentials.map(credentialCarrier);
+  if (!isSortedUnique(carriers)) {
+    context.addIssue({
+      code: "custom",
+      path: ["request", "credentials"],
+      message: "Credentials are sorted by where they travelled, one per header or field.",
+    });
+  }
+  for (const [index, used] of record.request.credentials.entries()) {
+    if ("header_name" in used && !names.includes(used.header_name)) {
+      context.addIssue({
+        code: "custom",
+        path: ["request", "credentials", index, "header_name"],
+        message: "A credential names a header the request sent.",
+      });
+    }
+    if ("field" in used && record.request.body?.media_type !== FORM_MEDIA_TYPE) {
+      context.addIssue({
+        code: "custom",
+        path: ["request", "credentials", index, "field"],
+        message: "A form credential travels in a form body the request sent.",
+      });
+    }
+    if (
+      used.scheme === "query" &&
+      (url.searchParams.getAll(used.parameter).length !== 1 ||
+        url.searchParams.get(used.parameter) !== used.handle_digest)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["request", "credentials", index, "parameter"],
+        message: "A query credential appears once in the recorded URL, as its handle digest only.",
+      });
+    }
+  }
+  const bodyless = record.request.method === "GET" || record.request.method === "HEAD";
+  if (bodyless && record.request.body !== null) {
+    context.addIssue({
+      code: "custom",
+      path: ["request", "body"],
+      message: "A GET or HEAD request carries no body.",
+    });
+  }
+  if (record.outcome === "responded") {
+    const headers = record.response.headers;
+    for (const [index, [name]] of headers.entries()) {
+      if (UNRECORDABLE_RESPONSE_HEADERS.has(name)) {
+        context.addIssue({
+          code: "custom",
+          path: ["response", "headers", index],
+          message: `Response header '${name}' is never recorded.`,
+        });
+      }
+    }
+    const keys = headers.map(([name, value]) => `${name}\u0000${value}`);
+    if (!isSortedUnique(keys)) {
+      context.addIssue({
+        code: "custom",
+        path: ["response", "headers"],
+        message: "Response headers are sorted and unique.",
+      });
+    }
+  }
+}
+
 /** The physical exchange only. What it proves is decided by whoever reads it. */
 export const exchangeRecordCoreSchema = z
+  .discriminatedUnion("outcome", [responded, failed])
+  .superRefine(checkExchange);
+
+/**
+ * A sealed record as it travels: the physical exchange and the digest that
+ * closes it, so a schema anywhere a record is carried (an API body, say) holds
+ * it to both. `verifyExchangeRecord` is the same check for a record in hand.
+ */
+export const exchangeRecordSchema = z
   .discriminatedUnion("outcome", [
-    z
-      .object({
-        ...timing,
-        outcome: z.literal("responded"),
-        request,
-        response,
-      })
-      .strict(),
-    z
-      .object({
-        ...timing,
-        outcome: z.literal("transport_error"),
-        request,
-        reason: z.enum([
-          "dns_failure",
-          "deadline_exceeded",
-          "tls_failure",
-          "byte_limit",
-          "non_public_address",
-          "policy_blocked",
-          "other",
-        ]),
-      })
-      .strict(),
+    responded.safeExtend({ exchange_digest: digestSchema }),
+    failed.safeExtend({ exchange_digest: digestSchema }),
   ])
-  .superRefine((record, context) => {
-    if (compareInstants(record.started_at, record.finished_at) > 0) {
+  .superRefine(({ exchange_digest, ...core }, context) => {
+    checkExchange(core, context);
+    if (digest(core) !== exchange_digest) {
       context.addIssue({
         code: "custom",
-        path: ["finished_at"],
-        message: "An exchange cannot finish before it starts.",
+        path: ["exchange_digest"],
+        message: "Exchange record digest does not match its physical exchange.",
       });
-    }
-    const url = new URL(record.request.url);
-    if (url.username || url.password || url.hash) {
-      context.addIssue({
-        code: "custom",
-        path: ["request", "url"],
-        message: "An exchange URL carries no credentials or fragment.",
-      });
-    }
-    const names = record.request.header_names;
-    if (!isSortedUnique(names)) {
-      context.addIssue({
-        code: "custom",
-        path: ["request", "header_names"],
-        message: "Request header names are sorted and unique.",
-      });
-    }
-    const carriers = record.request.credentials.map(credentialCarrier);
-    if (!isSortedUnique(carriers)) {
-      context.addIssue({
-        code: "custom",
-        path: ["request", "credentials"],
-        message: "Credentials are sorted by where they travelled, one per header or field.",
-      });
-    }
-    for (const [index, used] of record.request.credentials.entries()) {
-      if ("header_name" in used && !names.includes(used.header_name)) {
-        context.addIssue({
-          code: "custom",
-          path: ["request", "credentials", index, "header_name"],
-          message: "A credential names a header the request sent.",
-        });
-      }
-      if ("field" in used && record.request.body?.media_type !== FORM_MEDIA_TYPE) {
-        context.addIssue({
-          code: "custom",
-          path: ["request", "credentials", index, "field"],
-          message: "A form credential travels in a form body the request sent.",
-        });
-      }
-      if (
-        used.scheme === "query" &&
-        (url.searchParams.getAll(used.parameter).length !== 1 ||
-          url.searchParams.get(used.parameter) !== used.handle_digest)
-      ) {
-        context.addIssue({
-          code: "custom",
-          path: ["request", "credentials", index, "parameter"],
-          message:
-            "A query credential appears once in the recorded URL, as its handle digest only.",
-        });
-      }
-    }
-    const bodyless = record.request.method === "GET" || record.request.method === "HEAD";
-    if (bodyless && record.request.body !== null) {
-      context.addIssue({
-        code: "custom",
-        path: ["request", "body"],
-        message: "A GET or HEAD request carries no body.",
-      });
-    }
-    if (record.outcome === "responded") {
-      const headers = record.response.headers;
-      for (const [index, [name]] of headers.entries()) {
-        if (UNRECORDABLE_RESPONSE_HEADERS.has(name)) {
-          context.addIssue({
-            code: "custom",
-            path: ["response", "headers", index],
-            message: `Response header '${name}' is never recorded.`,
-          });
-        }
-      }
-      const keys = headers.map(([name, value]) => `${name}\u0000${value}`);
-      if (!isSortedUnique(keys)) {
-        context.addIssue({
-          code: "custom",
-          path: ["response", "headers"],
-          message: "Response headers are sorted and unique.",
-        });
-      }
     }
   });
 

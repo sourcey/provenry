@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { z } from "zod";
 import {
   credentialCarrier,
   exchangeRecordCoreSchema,
+  exchangeRecordSchema,
   MAXIMUM_RECORDED_HEADERS,
   recordableResponseHeaders,
   sealExchangeRecord,
@@ -55,6 +57,20 @@ test("an exchange seals its physical facts and verifies byte for byte", () => {
   assert.throws(
     () => verifyExchangeRecord({ ...sealed, response: { ...sealed.response, status: 200 } }),
     /does not match/u,
+  );
+});
+
+test("a sealed record travels in a schema that holds it to its digest", () => {
+  const sealed = sealExchangeRecord(responded);
+  assert.deepEqual(exchangeRecordSchema.parse(sealed), sealed);
+  assert.throws(
+    () => exchangeRecordSchema.parse({ ...sealed, started_at: "2026-10-06T09:59:59.000Z" }),
+    /does not match/u,
+  );
+  assert.throws(() => exchangeRecordSchema.parse(exchangeRecordCoreSchema.parse(responded)));
+  // An API document can carry it: the schema is plain JSON Schema.
+  assert.doesNotThrow(() =>
+    z.toJSONSchema(exchangeRecordSchema, { target: "draft-2020-12", unrepresentable: "throw" }),
   );
 });
 
