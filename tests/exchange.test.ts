@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  credentialCarrier,
   exchangeRecordCoreSchema,
   MAXIMUM_RECORDED_HEADERS,
   recordableResponseHeaders,
@@ -192,6 +193,31 @@ test("request header names and response headers are canonical", () => {
     (_, index) => [`x-h${index}`, "1"] as const,
   );
   assert.throws(() => recordableResponseHeaders(many), /at most/u);
+});
+
+test("query credentials are recorded only as a handle digest in one named parameter", () => {
+  const credential = {
+    handle_digest: digest({ handle: "query-key" }),
+    scheme: "query" as const,
+    parameter: "api_key",
+  };
+  const request = {
+    ...responded.request,
+    url: `https://api.example.com/v1/messages?api_key=${encodeURIComponent(credential.handle_digest)}`,
+    credentials: [credential],
+  };
+  const sealed = sealExchangeRecord({ ...responded, request });
+  assert.deepEqual(verifyExchangeRecord(sealed), sealed);
+  assert.equal(credentialCarrier(credential), "query:api_key");
+  for (const url of [
+    "https://api.example.com/v1/messages",
+    "https://api.example.com/v1/messages?api_key=actual-secret",
+    `${request.url}&api_key=actual-secret`,
+  ])
+    assert.throws(
+      () => sealExchangeRecord({ ...responded, request: { ...request, url } }),
+      /handle digest only/u,
+    );
 });
 
 test("a status outside the defined classes is still the response a service gave", () => {

@@ -68,6 +68,13 @@ const credential = z.union([
       field: formField,
     })
     .strict(),
+  z
+    .object({
+      handle_digest: digestSchema,
+      scheme: z.literal("query"),
+      parameter: formField,
+    })
+    .strict(),
 ]);
 export type ExchangeCredentialUse = z.infer<typeof credential>;
 
@@ -175,6 +182,18 @@ export const exchangeRecordCoreSchema = z
           message: "A form credential travels in a form body the request sent.",
         });
       }
+      if (
+        used.scheme === "query" &&
+        (url.searchParams.getAll(used.parameter).length !== 1 ||
+          url.searchParams.get(used.parameter) !== used.handle_digest)
+      ) {
+        context.addIssue({
+          code: "custom",
+          path: ["request", "credentials", index, "parameter"],
+          message:
+            "A query credential appears once in the recorded URL, as its handle digest only.",
+        });
+      }
     }
     const bodyless = record.request.method === "GET" || record.request.method === "HEAD";
     if (bodyless && record.request.body !== null) {
@@ -260,7 +279,8 @@ export function recordableResponseHeaders(
 /** Where one credential travelled, in the order a record lists them. */
 export function credentialCarrier(
   used: ExchangeCredentialUse,
-): `header:${string}` | `form:${string}` {
+): `header:${string}` | `form:${string}` | `query:${string}` {
+  if (used.scheme === "query") return `query:${used.parameter}`;
   return "field" in used ? `form:${used.field}` : `header:${used.header_name}`;
 }
 

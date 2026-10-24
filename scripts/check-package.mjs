@@ -70,9 +70,10 @@ try {
       'import { digest } from "provenry/primitives";',
       'import { publicationChangeSchema } from "provenry/contracts/publication";',
       'import type { PublicationReadLimits } from "provenry/publication/objects";',
+      'import { verifyGitHubActionsToken, verifyGitHubActionsAttestation } from "provenry/workload/github-actions";',
       "const limits: PublicationReadLimits = { maxFiles: 2, maxFileBytes: 10, maxTotalBytes: 20 };",
       'const schema = publicationChangeSchema({ kind: z.literal("changed"), subjectTypes: ["note"], tombstone: z.object({}).strict() });',
-      'void [limits, schema, digest({ note: "external" })];',
+      'void [limits, schema, digest({ note: "external" }), verifyGitHubActionsToken, verifyGitHubActionsAttestation];',
       "",
     ].join("\n"),
   );

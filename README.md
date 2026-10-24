@@ -60,12 +60,21 @@ parent, the bundle and the verifier that bind it, for example
 | `capture/methods`, `capture/start`, `capture/attempts` | Installed capture methods, the reservation made before any physical capture, and the sealed result |
 | `capture/attestation` | Signed attestations of capture attempts, verified against a historical signer registry; `captureAttemptReceiptTrust` is that trust over a registry's keys, and `verifyAttestedCaptures` proves a published set of them |
 | `capture/normalize`, `capture/html` | Captured bytes to the normalized text evidence grounds in, re-run by a verifier to check a normalized digest offline: HTML as named sections, text with its lines trimmed, JSON canonicalized, under the profile a product retains; `capture/html` is its memory-bounded parse5 reader, the one module that names parse5 |
-| `exchange/records` | One machine exchange sealed for verification: the request a service received (header names only, each credential as its custody handle's digest and the header or form field that carried it), the response it gave and when; never a secret or a cookie |
+| `exchange/records` | One machine exchange sealed for verification: the request a service received (header names only, each credential as its custody handle's digest and its header, form or query carrier), the response it gave and when; never a secret or a cookie |
+| `workload/github-actions` | Offline RS256/JWKS and Sigstore verification of GitHub Actions identities, exact attested content and authenticated signing time, for public and private repositories |
 | `contracts/publication` | Envelope schemas, change vocabulary and the ownership registry of an instance |
 | `publication/envelope` | Sealing and verifying a release: object manifest, change log, diff, descriptor and bundle |
 | `publication/changes`, `publication/objects`, `publication/delivery`, `publication/preparation` | Change ordering, release files on disk, content-addressed delivery, and build-then-verify over installed code |
 
 Each module is a subpath export: `import { digest } from "provenry/primitives"`.
+
+The workload verifier takes keys and Sigstore trusted roots supplied by its
+caller. It never fetches them or starts work. Verification establishes who
+signed which bytes, not whether that workflow is authorized or its claims are
+true. The caller must match the returned immutable repository and owner IDs,
+workflow URI and commit, runner environment, run and attempt against its own
+policy and challenge. Private-instance bundles require an authenticated TSA
+timestamp; public-instance bundles require the configured transparency logs.
 
 ## Composing an instance
 

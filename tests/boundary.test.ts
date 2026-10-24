@@ -29,7 +29,7 @@ const importSpecifiers = (text: string) =>
     specifier ? [specifier] : [],
   );
 
-test("engine source imports only Node built-ins, zod, the capture HTML parser and engine files", async () => {
+test("engine source imports only Node, schemas and its capability-owned parsers and verifier", async () => {
   const violations: string[] = [];
   for (const file of await sourceFiles()) {
     const text = await readFile(file, "utf8");
@@ -37,6 +37,16 @@ test("engine source imports only Node built-ins, zod, the capture HTML parser an
       if (specifier.startsWith("node:") || specifier === "zod") continue;
       // The capture normalizer's HTML parser is the one file that names parse5.
       if (specifier === "parse5" && file === join(root, "modules/capture/src/html.ts")) continue;
+      if (
+        [
+          "@sigstore/bundle",
+          "@sigstore/core",
+          "@sigstore/protobuf-specs",
+          "@sigstore/verify",
+        ].includes(specifier) &&
+        file === join(root, "modules/workload/src/github-actions.ts")
+      )
+        continue;
       const target = specifier.startsWith(".") ? resolve(dirname(file), specifier) : null;
       const inside =
         target !== null &&

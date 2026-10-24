@@ -9,7 +9,8 @@ successor rules.
 It imports no product code, product policy, payment, provider credential,
 database adapter, hosted service or site. Products and platforms import its
 package exports; the engine never imports them. `tests/boundary.test.ts`
-enforces this: source may import only Node built-ins, zod and engine files;
+enforces this: source may import only Node built-ins, zod and engine files,
+the capture owner's HTML parser, and the workload owner's Sigstore verifier;
 neither source nor tests may name a product or product domain; and the sealing
 and verification path may not reach the filesystem.
 
