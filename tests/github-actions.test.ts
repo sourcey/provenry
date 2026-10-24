@@ -24,6 +24,11 @@ const claims = {
   repository: "example/compile",
   repository_id: "1234",
   repository_owner_id: "5678",
+  ref: "refs/heads/main",
+  sha: "b".repeat(40),
+  workflow_ref: "example/compile/.github/workflows/release.yml@refs/heads/main",
+  workflow_sha: "b".repeat(40),
+  event_name: "workflow_dispatch",
   run_id: "90",
   run_attempt: "2",
   runner_environment: "github-hosted",
@@ -51,7 +56,21 @@ test("a signed GitHub token returns immutable caller and reusable-workflow claim
   // A token from an ordinary workflow is valid too. Requiring a specific
   // reusable workflow and hosted runner is the caller's authorization policy.
   const { job_workflow_ref: _, job_workflow_sha: __, ...ordinary } = claims;
-  assert.equal(verifyToken(token(ordinary)).job_workflow_ref, undefined);
+  const result = verifyToken(token(ordinary));
+  assert.equal(result.job_workflow_ref, undefined);
+  assert.equal(result.workflow_ref, ordinary.workflow_ref);
+  assert.equal(result.workflow_sha, ordinary.workflow_sha);
+  const branch = {
+    ...claims,
+    ref: "refs/heads/feature",
+    sha: "c".repeat(40),
+    workflow_ref: "example/compile/.github/workflows/release.yml@refs/heads/feature",
+    workflow_sha: "c".repeat(40),
+    event_name: "pull_request_target",
+  };
+  // Signature verification preserves the different caller. The authorizing
+  // host can refuse it without conflating it with the unchanged reusable signer.
+  assert.deepEqual(verifyToken(token(branch)), branch);
   assert.equal(
     verifyToken(token({ ...claims, runner_environment: "self-hosted" })).runner_environment,
     "self-hosted",
@@ -71,6 +90,13 @@ test("token identity, audience, time and immutable ids are verified, not merely 
     { repository_owner_id: "renamable-login" },
     { run_attempt: "0" },
     { repository: "not-a-repository" },
+    { ref: undefined },
+    { sha: undefined },
+    { sha: "mutable-branch" },
+    { workflow_ref: undefined },
+    { workflow_sha: undefined },
+    { workflow_sha: "mutable-tag" },
+    { event_name: undefined },
     { job_workflow_sha: undefined },
   ])
     assert.throws(() => verifyToken(token({ ...claims, ...changed })));
@@ -119,8 +145,16 @@ test("a real public reusable-workflow bundle verifies the signer, not the callin
   );
   assert.equal(result.signerDigest, "09b495c3f12c7881b3cc17209a327792065c1a1d");
   assert.equal(result.repositoryUri, "https://github.com/malancas/attest-demo");
+  assert.equal(result.repositoryDigest, "95baf27389e83e6a5c48f42e190d48d7abcea19e");
+  assert.equal(result.repositoryRef, "refs/heads/main");
   assert.equal(result.repositoryId, "804070735");
   assert.equal(result.repositoryOwnerId, "16248153");
+  assert.equal(
+    result.buildConfigUri,
+    "https://github.com/malancas/attest-demo/.github/workflows/shared.yml@refs/heads/main",
+  );
+  assert.equal(result.buildConfigDigest, "95baf27389e83e6a5c48f42e190d48d7abcea19e");
+  assert.equal(result.buildTrigger, "workflow_dispatch");
   assert.equal(
     result.runInvocationUri,
     "https://github.com/malancas/attest-demo/actions/runs/9228858953/attempts/1",
@@ -140,6 +174,14 @@ test("a real private-workflow bundle verifies with GitHub's TSA, without a publi
     subjectDigest: privateDigest,
   });
   assert.equal(result.signerDigest, "a6c23b9806c593664f68637c8f9d45dfcf98b2db");
+  assert.equal(result.repositoryDigest, "a6c23b9806c593664f68637c8f9d45dfcf98b2db");
+  assert.equal(result.repositoryRef, "refs/heads/main");
+  assert.equal(
+    result.buildConfigUri,
+    "https://github.com/actions/attest-demo/.github/workflows/build-python.yml@refs/heads/main",
+  );
+  assert.equal(result.buildConfigDigest, "a6c23b9806c593664f68637c8f9d45dfcf98b2db");
+  assert.equal(result.buildTrigger, "workflow_dispatch");
   assert.equal(result.repositoryId, "763287532");
   assert.equal(result.repositoryOwnerId, "44036562");
   assert.equal(result.repositoryVisibility, "private");

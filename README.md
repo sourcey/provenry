@@ -72,8 +72,12 @@ The workload verifier takes keys and Sigstore trusted roots supplied by its
 caller. It never fetches them or starts work. Verification establishes who
 signed which bytes, not whether that workflow is authorized or its claims are
 true. The caller must match the returned immutable repository and owner IDs,
-workflow URI and commit, runner environment, run and attempt against its own
-policy and challenge. Private-instance bundles require an authenticated TSA
+signer workflow and commit, initiating workflow and commit, source ref and
+commit, trigger, runner environment, run and attempt against its own policy
+and challenge. A reusable signer and its initiating workflow are separate
+identities; authorization must not confuse them. Ordinary-job tokens retain
+their initiating workflow identity without reusable-workflow claims.
+Private-instance bundles require an authenticated TSA
 timestamp; public-instance bundles require the configured transparency logs.
 
 ## Composing an instance

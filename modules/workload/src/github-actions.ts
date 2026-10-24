@@ -24,10 +24,16 @@ const claimsSchema = z.object({
   repository,
   repository_id: positiveId,
   repository_owner_id: positiveId,
+  ref: text,
+  sha: commit,
+  workflow_ref: text,
+  workflow_sha: commit,
+  event_name: text,
   run_id: positiveId,
   run_attempt: positiveId,
   runner_environment: z.enum(["github-hosted", "self-hosted"]),
   repository_visibility: z.enum(["public", "private", "internal"]),
+  /** Only jobs using a reusable workflow carry these additional signer claims. */
   job_workflow_ref: text.optional(),
   job_workflow_sha: commit.optional(),
 });
@@ -109,8 +115,14 @@ export interface GitHubActionsAttestation {
   readonly signerDigest: string;
   readonly runnerEnvironment: "github-hosted" | "self-hosted";
   readonly repositoryUri: string;
+  readonly repositoryDigest: string;
+  readonly repositoryRef: string;
   readonly repositoryId: string;
   readonly repositoryOwnerId: string;
+  /** The initiating workflow, distinct from the reusable signer workflow. */
+  readonly buildConfigUri: string;
+  readonly buildConfigDigest: string;
+  readonly buildTrigger: string;
   readonly repositoryVisibility: "public" | "private" | "internal";
   readonly runInvocationUri: string;
   readonly signingTime: string;
@@ -196,8 +208,13 @@ export function verifyGitHubActionsAttestation(input: {
     signerDigest: commit.parse(extension(10)),
     runnerEnvironment: z.enum(["github-hosted", "self-hosted"]).parse(extension(11)),
     repositoryUri,
+    repositoryDigest: commit.parse(extension(13)),
+    repositoryRef: extension(14),
     repositoryId: positiveId.parse(extension(15)),
     repositoryOwnerId: positiveId.parse(extension(17)),
+    buildConfigUri: extension(18),
+    buildConfigDigest: commit.parse(extension(19)),
+    buildTrigger: extension(20),
     repositoryVisibility: z.enum(["public", "private", "internal"]).parse(extension(22)),
     runInvocationUri,
     signingTime: new Date(Math.min(...times)).toISOString(),
