@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.3.0 - 2026-10-25
+
+### Added
+
+- `workload/github-actions`: `verifyGitHubActionsToken` checks a GitHub Actions
+  OIDC token (RS256, against JWKS keys the caller supplies, for an audience) and
+  returns its typed claims, the reusable workflow's reference and commit and the
+  initiating workflow's included. `verifyGitHubActionsAttestation` verifies a
+  Sigstore DSSE in-toto bundle offline against a trusted root the caller supplies
+  (public-good's or GitHub's own), requires an authenticated signing time, and
+  returns the certificate's workflow identity: the signer and calling workflows,
+  repository and owner ids, run invocation, runner environment and visibility.
+- A `query:<name>` credential carrier in exchange records: a credential sent as a
+  query parameter is recorded as its handle digest in the URL, never its value.
+- `exchangeRecordSchema` (in `exchange/records`): a sealed exchange record that
+  an API body can carry. Parsing holds it to the core schema's checks and to
+  its digest; its JSON Schema states the shape only.
+
+### Changed
+
+- Verification depends on `@sigstore/verify` 3.1.1, `@sigstore/core` 3.2.1,
+  `@sigstore/bundle` 4.0.0 and `@sigstore/protobuf-specs` 0.5.2. Nothing in
+  Provenry signs.
+
 ## 0.2.2 - 2026-10-10
 
 ### Added
