@@ -68,7 +68,7 @@ test("a sealed record travels in a schema that holds it to its digest", () => {
     /does not match/u,
   );
   assert.throws(() => exchangeRecordSchema.parse(exchangeRecordCoreSchema.parse(responded)));
-  // An API document can carry it: the schema is plain JSON Schema.
+  // An API document can describe it: the schema renders as JSON Schema, of its shape alone.
   assert.doesNotThrow(() =>
     z.toJSONSchema(exchangeRecordSchema, { target: "draft-2020-12", unrepresentable: "throw" }),
   );

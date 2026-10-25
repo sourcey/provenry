@@ -232,9 +232,11 @@ export const exchangeRecordCoreSchema = z
   .superRefine(checkExchange);
 
 /**
- * A sealed record as it travels: the physical exchange and the digest that
- * closes it, so a schema anywhere a record is carried (an API body, say) holds
- * it to both. `verifyExchangeRecord` is the same check for a record in hand.
+ * A sealed record as it travels: parsed, it is held to the physical exchange's
+ * checks and the digest that closes it, as `verifyExchangeRecord` holds a
+ * record in hand. Its JSON Schema states only the shape, since no JSON Schema
+ * computes a digest: an API body that carries a record is checked by parsing
+ * it here, never by the published schema alone.
  */
 export const exchangeRecordSchema = z
   .discriminatedUnion("outcome", [
